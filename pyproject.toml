@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dc-input"
-version = "0.1.0"
+version = "0.1.1"
 description = "Interactive CLI prompts for nested dataclasses."
 readme = "README.md"
 authors = [{ name = "Jan Ebel van Wijk", email = "jan86@posteo.de" }]
