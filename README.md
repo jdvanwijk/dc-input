@@ -1,7 +1,7 @@
 # dc-input
 
-[![PyPI](https://img.shields.io/pypi/v/data-cli.svg)](https://pypi.org/project/data-cli/)
-[![License](https://img.shields.io/github/license/yourusername/data-cli.svg)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/data-cli.svg)](https://pypi.org/project/dc-input/)
+[![License](https://img.shields.io/github/license/yourusername/dc-input.svg)](LICENSE)
 
 A tiny, dependency-free library that lets you **interactively fill dataclass instances** via the command line.
 Useful for quick data entry, prototyping, or structured configuration; integrates easily with your own CLI tools.
