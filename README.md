@@ -1,10 +1,10 @@
-# data-cli
+# dc-input
 
 [![PyPI](https://img.shields.io/pypi/v/data-cli.svg)](https://pypi.org/project/data-cli/)
 [![License](https://img.shields.io/github/license/yourusername/data-cli.svg)](LICENSE)
 
 A tiny, dependency-free library that lets you **interactively fill dataclass instances** via the command line.
-Useful for quick data entry, prototyping, or structured configuration; easily integrated into your own CLI tools.
+Useful for quick data entry, prototyping, or structured configuration; integrates easily with your own CLI tools.
 ---
 
 ## Features
@@ -15,7 +15,7 @@ Useful for quick data entry, prototyping, or structured configuration; easily in
 
 ## Installation
 ```bash
-pip install data_cli
+pip install dc_input
 ```
 ---
 
@@ -25,7 +25,7 @@ pip install data_cli
 from dataclasses import dataclass
 from datetime import date
 
-from data_cli import from_dataclass
+from dc_input import from_dataclass
 
 
 # --- Setup custom parsers as required  ---

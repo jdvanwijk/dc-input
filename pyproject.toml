@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "data-cli"
+name = "dc-input"
 version = "0.1.0"
 description = "Interactive CLI prompts for nested dataclasses."
 readme = "README.md"
@@ -18,5 +18,5 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/jdvanwijk/data-cli"
-Repository = "https://github.com/jdvanwijk/data-cli"
+Homepage = "https://github.com/jdvanwijk/dc-input"
+Repository = "https://github.com/jdvanwijk/dc-input"
