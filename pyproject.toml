@@ -4,17 +4,20 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dc-input"
-version = "0.1.2"
-description = "Interactive CLI prompts for nested dataclasses."
+version = "0.2.0"
+description = "Generate CLI input prompts from dataclasses."
 readme = "README.md"
 authors = [{ name = "Jan Ebel van Wijk", email = "jan86@posteo.de" }]
 license = { text = "MIT" }
-requires-python = ">=3.12"
-keywords = ["dataclasses", "cli", "interactive", "input", "wizard"]
+requires-python = ">=3.10"
+keywords = ["dataclass", "cli", "interactive", "input", "wizard"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent"
+]
+dependencies = [
+    "pytest>=7.4.4",
 ]
 
 [project.urls]
