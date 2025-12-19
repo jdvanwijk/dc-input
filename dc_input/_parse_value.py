@@ -3,80 +3,9 @@ from __future__ import annotations
 from types import NoneType, UnionType
 from typing import Annotated, Any, Literal, Union
 
-from dc_input._errors import InputError, InternalError, ParserRegistryError
 from dc_input._types import ParserFunc, ParserRegistry
 
-from dc_input._utils import get_type_base_args, safe_issubclass
-
-
-# ------------------------------------------------------------
-# Default parsers for builtin primitives (and None)
-# ------------------------------------------------------------
-def _parse_str(s: str) -> str:
-    return s
-
-
-def _parse_int(s: str) -> int:
-    try:
-        return int(s)
-    except ValueError as e:
-        raise InputError(f"Invalid integer: {s}") from e
-
-
-def _parse_float(s: str) -> float:
-    try:
-        return float(s)
-    except ValueError as e:
-        raise InputError(f"Invalid float: {s}") from e
-
-
-def _parse_bool(s: str) -> bool:
-    sl = s.strip().lower()
-    true = ("1", "true", "t", "yes", "y")
-    false = ("0", "false", "f", "no", "n")
-    if sl in true:
-        return True
-    if sl in false:
-        return False
-    raise InputError(f"value must be in {true} for True or {false} for False")
-
-
-def _parse_none(s: str) -> None:
-    sl = s.strip().lower()
-    none = ("", "none", "null", "nan")
-    if sl in none:
-        return None
-    raise InputError(f"value must be in {none}")
-
-
-def get_default_registry() -> ParserRegistry:
-    return {
-        str: _parse_str,
-        int: _parse_int,
-        float: _parse_float,
-        bool: _parse_bool,
-        NoneType: _parse_none,
-    }
-
-
-def prepare_parsers(
-    default: ParserRegistry, user: ParserRegistry | None
-) -> ParserRegistry:
-    if not user:
-        return default
-
-    user_normalized = {}
-    for t, parser in user.items():
-        if t in (UnionType, Union, Any, Literal, Annotated):
-            raise ParserRegistryError(
-                f"Not allowed to override parser for type '{t.__name__}'"
-            )
-        if t is None:
-            user_normalized[NoneType] = parser
-        else:
-            user_normalized[t] = parser
-
-    return default | user_normalized
+from dc_input._utils import get_type_base_args, safe_issubclass, get_optional_non_none
 
 
 # ------------------------------------------------------------
@@ -95,8 +24,7 @@ def parse_input(value: str, t: Any, registry: ParserRegistry):
     # ---------- Handle Union[T, None] ----------
     if base is UnionType or base is Union:
         # assume parse_schema rejects all other unions
-        non_none = [a for a in args if a is not NoneType]
-        elem_t = non_none[0]
+        elem_t = get_optional_non_none(t)
         elem_t_base, _ = get_type_base_args(elem_t)
 
         # Choose flat or nested based on inner T
@@ -117,8 +45,7 @@ def parse_input(value: str, t: Any, registry: ParserRegistry):
 
 
 def _coerce(value: str | list, t: Any, registry: ParserRegistry):
-    if not isinstance(value, (str, list)):
-        raise InternalError("Provided value must be string or list of strings")
+    assert isinstance(value, (str, list))
 
     base, args = get_type_base_args(t)
 
@@ -133,7 +60,7 @@ def _coerce(value: str | list, t: Any, registry: ParserRegistry):
         for arg in args:
             if str(arg) == value:
                 return arg
-        raise InputError(f"value must be in {args}")
+        raise ValueError(f"value must be in {args}")
 
     # ---------- Union[T, None] ----------
     if base is UnionType or base is Union:
@@ -151,7 +78,7 @@ def _coerce(value: str | list, t: Any, registry: ParserRegistry):
     # ---------- List, set (+ subclasses) ----------
     if safe_issubclass(base, (list, set)):
         if not isinstance(value, list):
-            raise InputError(
+            raise ValueError(
                 "Input does not match type structure (missing parenthesis?)"
             )
 
@@ -162,7 +89,7 @@ def _coerce(value: str | list, t: Any, registry: ParserRegistry):
     # ---------- Tuple (+ subclasses) ----------
     if safe_issubclass(base, tuple):
         if not isinstance(value, list):
-            raise InputError(
+            raise ValueError(
                 "Input does not match type structure (missing parenthesis?)"
             )
 
@@ -175,7 +102,7 @@ def _coerce(value: str | list, t: Any, registry: ParserRegistry):
             return base(coerced)
         else:
             if len(value) != len(args):
-                raise InputError(
+                raise ValueError(
                     "number of values does not match number of tuple parameters"
                 )
             coerced = [_coerce(v, elem_t, registry) for v, elem_t in zip(value, args)]
@@ -184,13 +111,13 @@ def _coerce(value: str | list, t: Any, registry: ParserRegistry):
     # ---------- Dict (+ subclasses) ----------
     if safe_issubclass(base, dict):
         if not isinstance(value, list):
-            raise InputError("dict entries must be comma-separated (k,v) pairs")
+            raise ValueError("dict entries must be comma-separated (k,v) pairs")
 
         key_t, val_t = args if args else (Any, Any)
         result = base()
         for pair in value:
             if len(pair) != 2:
-                raise InputError(
+                raise ValueError(
                     f"dict entries must be comma-separated (k,v) pairs; got {pair!r}"
                 )
 
@@ -268,7 +195,7 @@ def _parse_structure_nested(s: str) -> list[str | list]:
                 stack[-1].append(cur)
             token = []
             if len(stack) == 1:
-                raise InputError("Unmatched ')'")
+                raise ValueError("Unmatched ')'")
             stack.pop()
             continue
         if ch == ",":
@@ -283,7 +210,7 @@ def _parse_structure_nested(s: str) -> list[str | list]:
     if last:
         stack[-1].append(last)
     if len(stack) != 1:
-        raise InputError("Missing closing ')'")
+        raise ValueError("Missing closing ')'")
     return res
 
 
@@ -294,7 +221,6 @@ def _select_parser(base: Any, registry: ParserRegistry) -> ParserFunc:
       2. MRO fallback if base is a class
       3. Call base directly
     """
-    # Assume prepare_parsers rejected UnionType, Union, Any, Literal, Annotated
     if parser := registry.get(base):
         return parser
 
@@ -307,4 +233,4 @@ def _select_parser(base: Any, registry: ParserRegistry) -> ParserFunc:
         return lambda s: base(s)
 
     # User did not provide valid parser for base
-    raise ParserRegistryError(f"No parser available for type {base!r}")
+    raise ValueError(f"No parser available for type {base!r}")
