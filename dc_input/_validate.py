@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import is_dataclass, dataclass
+from dataclasses import is_dataclass, dataclass, fields
 from types import UnionType, NoneType
-from typing import Any, get_type_hints, Union, Annotated, Literal
+from typing import Any, get_type_hints, Union, Annotated, Literal, TypeVar, Optional
 
 from dc_input._types import ParserRegistry, ContainerRegistry
 from dc_input._utils import (
@@ -12,6 +12,7 @@ from dc_input._utils import (
     find_schema_in_type_args,
 )
 
+T = TypeVar("T")
 
 def validate(
     schema: Any, parsers: ParserRegistry, containers: ContainerRegistry
@@ -39,15 +40,19 @@ def validate(
         error_msg.append("")
 
     if error_msg:
+        error_msg = _remove_duplicates(error_msg)
         raise ValueError("\n".join(error_msg))
 
 
 def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
     """
     Enforced rules:
-    - Schema must be a dataclass.
-    - Optional:
-        * Only Optional[T] (T | None) unions are allowed (other Unions are ambiguous when parsing)
+    - Schema:
+        * Must be a dataclass
+        * Must have at least one field
+    - Unions:
+        * Only T | None unions are allowed (other Unions are ambiguous when parsing)
+        * Use of typing.Optional is not allowed (considered deprecated, adds parsing complexity)
     - List/Set/Tuple:
         * may only nest one level (ie: list[list] is okay, list[list[list]] isn't)
     - Dicts:
@@ -62,20 +67,25 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
         _errors = []
 
     if not is_dataclass(sc):
-        _errors.append("Schema must be a dataclass")
+        _errors.append(f"Schema must be a dataclass [schema: {sc.__name__}]")
+    elif not fields(sc):
+        _errors.append(f"Schema must have at least one field [schema: {sc.__name__}]")
 
     for name, t in get_type_hints(sc).items():
-        # Recursively validate nested schemas
-        if is_dataclass(t):
-            _get_schema_errors(t, _errors)
-
         base, args = get_type_base_args(t)
 
-        # Union / Optional
+        # Recursively validate nested schemas
+        if nested := find_schema_in_type_args(args):
+            _get_schema_errors(nested, _errors)
+
+        # Union
+        if base is Optional:
+            _errors.append(f"Optional[T] is not allowed; use T | None instead [schema: {sc.__name__}, field: '{name}']")
+            continue
         if base in (Union, UnionType):
             if NoneType not in args:
                 _errors.append(
-                    f"Ambiguous Union types {args}; only Optional[T] is allowed. "
+                    f"Ambiguous Union types {args}; only T | None is allowed. "
                     f"[schema: {sc.__name__}, field: '{name}']"
                 )
                 continue
@@ -83,7 +93,7 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
             non_none = [a for a in args if a is not NoneType]
             if len(non_none) != 1:
                 _errors.append(
-                    f"Optional must contain exactly one non-None type; got {args}. "
+                    f"T | None must contain exactly one non-None type; got {args}. "
                     f"[schema: {sc.__name__}, field: '{name}']"
                 )
 
@@ -197,6 +207,16 @@ def _max_container_depth(t: Any) -> int:
 
 def _format_err(err: str) -> str:
     return f"- {err}"
+
+
+def _remove_duplicates(l: list[str]) -> list[str]:
+    seen: list[str] = []
+    for v in l:
+        if v in seen and v is not "\n":
+            continue
+        seen.append(v)
+
+    return seen
 
 
 if __name__ == "__main__":

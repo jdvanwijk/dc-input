@@ -4,12 +4,13 @@ import pytest
 from typing import Annotated, Any, Literal, Optional
 
 from dc_input._errors import InputError
-from dc_input._parse_input import (
-    get_default_registry,
+from dc_input._parse_value import (
     parse_input,
     _is_container_type,
     _select_parser,
 )
+from dc_input._parsers import get_default_registry
+
 
 # TODO: Test prepare parsers
 

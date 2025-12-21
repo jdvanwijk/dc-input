@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from dataclasses import MISSING, is_dataclass, dataclass, _MISSING_TYPE, field
-from types import UnionType, NoneType
-from typing import Union, Annotated, TypeVar, get_origin, get_args
+from dataclasses import dataclass,field
+from types import UnionType
+from typing import Annotated, TypeVar
 
 from dc_input._parse_schema import parse_schema
 from dc_input._parse_value import parse_input
@@ -11,7 +10,6 @@ from dc_input._parsers import get_default_registry
 from dc_input._types import (
     ParserRegistry,
     KeyPath,
-    MetadataDict,
     FieldMetadata,
     UserInput,
     InputResult,
@@ -21,9 +19,7 @@ from dc_input._types import (
 )
 from dc_input._utils import (
     get_type_base_args,
-    rgetitem,
     safe_issubclass,
-    rsetitem,
     find_schema_in_type_args,
     is_node,
     head,

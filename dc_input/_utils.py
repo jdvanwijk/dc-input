@@ -14,7 +14,7 @@ from typing import (
     Union,
 )
 
-from dc_input._types import GraphStart
+from dc_input._types import GraphStart, FieldMetadata, KeyPath
 
 
 class HasPrev(Protocol):
@@ -76,7 +76,7 @@ def safe_issubclass(
 
 def is_node(t: type) -> bool:
     base, args = get_type_base_args(t)
-    return is_dataclass(base) or base is GraphStart or find_schema_in_type_args(args)
+    return is_dataclass(base) or find_schema_in_type_args(args)
 
 
 def find_schema_in_type_args(args: tuple) -> type | None:
@@ -106,10 +106,13 @@ def find_schema_in_type_args(args: tuple) -> type | None:
 
 def get_optional_non_none(t: UnionType) -> type:
     base, args = get_type_base_args(t)
-    assert base is UnionType
+    print(t, base, args)
+    # assert base is UnionType
     non_none = [a for a in args if a is not NoneType]
 
     return non_none[0]
+
+
 
 def head(obj: V) -> V:
     res = obj
@@ -123,3 +126,8 @@ def tail(obj: W) -> W:
     while res.next:
         res = res.next
     return res
+
+
+def link(prev: FieldMetadata, cur: FieldMetadata) -> None:
+    prev.next = cur
+    cur.prev = prev

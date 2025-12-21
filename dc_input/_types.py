@@ -24,6 +24,7 @@ class FieldMetadata:
     repeat_n: tuple[int, int] = ()
     default: Any | NotProvided = NotProvided
     default_factory: Any | NotProvided = NotProvided
+    parent: Any = None
     prev: FieldMetadata | None = None
     next: FieldMetadata | None = None
     repeat_from: FieldMetadata | None = None
@@ -42,6 +43,7 @@ class FieldMetadata:
             f"name={self.name}, "
             f"type={self.type}, "
             f"path={self.path}, "
+            f"parent={self.parent}, "
             f"annotation={self.annotation}, "
             f"repeat_n={self.repeat_n}, "
             f"default={self.default}, "
@@ -55,12 +57,13 @@ class FieldMetadata:
 
 @dataclass
 class GraphStart(FieldMetadata):
-    name: str
     next: FieldMetadata | None = None
+    name: str = field(init=False)
     path: KeyPath = field(init=False)
     type: type = field(init=False)
 
     def __post_init__(self) -> None:
+        self.name = "GraphStart"
         self.path = ()
         self.type = GraphStart
 
@@ -90,6 +93,5 @@ class UserInput:
 ContainerRegistry = dict[type, type]
 InputResult = list[UserInput]
 KeyPath = tuple[str, ...]  # Path to a specific schema field
-MetadataDict = dict[KeyPath, FieldMetadata]
 ParserFunc = Callable[[str], Any]  # Used to parse a user input value
 ParserRegistry = dict[type, ParserFunc]  # Stores value parsers
