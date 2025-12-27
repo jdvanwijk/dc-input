@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass,field
+from dataclasses import dataclass, field, MISSING
 from types import UnionType
-from typing import Annotated, TypeVar
+from typing import Annotated, TypeVar, Any
 
 from dc_input._parse_schema import parse_schema
 from dc_input._parse_value import parse_input
@@ -10,24 +10,23 @@ from dc_input._parsers import get_default_registry
 from dc_input._types import (
     ParserRegistry,
     KeyPath,
-    FieldMetadata,
     UserInput,
-    InputResult,
-    NotProvided,
     ContainerRegistry,
     GraphEnd,
+    GraphStart,
+    QueryGraphPart,
+    Node,
+    Leaf,
 )
 from dc_input._utils import (
     get_type_base_args,
-    safe_issubclass,
-    find_schema_in_type_args,
-    is_node,
+    alt_issubclass,
     head,
-    get_optional_non_none,
 )
 from dc_input._validate import validate
 
 GREEN = "\033[32m"
+GREY = "\033[90m"
 RED = "\033[31m"
 RESET = "\033[0m"
 
@@ -43,100 +42,112 @@ def get_input(
 ) -> T:
     parsers = parsers or {}
     containers = containers or {}
-    
+
     validate(schema, parsers, containers)
 
-    first_field = parse_schema(schema, containers)
-    first_input = UserInput(field=first_field)
+    graph_head = parse_schema(schema, containers)
     parsers = get_default_registry() | parsers
-    result = _get_input_result(first_input, parsers)
+    result = _get_input_result(graph_head, parsers)
 
     return head(result)
 
 
-def _get_input_result(input_cur: UserInput, parsers: ParserRegistry) -> UserInput:
-    fld_cur = input_cur.field
-    if isinstance(fld_cur, GraphEnd):
-        return head(input_cur)
-    base, args = get_type_base_args(fld_cur.type)
+def _get_input_result(
+    part_cur: QueryGraphPart,
+    parsers: ParserRegistry,
+    _res: list[UserInput] | None = None,
+) -> UserInput:
+    _res = _res or []
 
-    # ---------- Handle nodes ----------
-    if fld_cur.skip_to:
-        # Begin optional node (T | None, list[T], tuple[T, ...], etc.)
-        _, args = get_type_base_args(fld_cur.type)
-        next_schema = find_schema_in_type_args(args).__name__
-        should_skip = _ask_yes_no(
-            f"\n> Provide input for {_format_node_header(next_schema)}? (y/n): "
-        )
-        if not should_skip:
-            print("\n", _format_node_header(next_schema))
+    match part_cur:
+        case GraphStart():
+            print(_format_node_header(part_cur.name))
+            return _get_input_result(part_cur.next, parsers, _res)
+        case GraphEnd():
+            for v in _res:
+                print(v)
+            return _res[0]
+        case Node():
+            if skip_target := part_cur.skip_target:
+                part_cur_fmt = f"[{_normalize_name(part_cur.name)}]"
+                part_parent_fmt = f"[{_normalize_name(part_cur.parent.name)}]"
+                if not _ask_yes_no(
+                    f"\n> Add {part_cur_fmt} to {part_parent_fmt}? (y/n): "
+                ):
+                    return _get_input_result(skip_target, parsers, _res)
 
-        next_field = fld_cur.next if not should_skip else fld_cur.skip_to
-        next_input = UserInput(next_field, prev=input_cur)
-        print(next_field)
-        return _get_input_result(next_input, parsers)
-    if is_node(fld_cur.type):
-        print(f"\n{_format_node_header(fld_cur.name, fld_cur.repeat_n)}")
-        input_cur.field = fld_cur.next
-        return _get_input_result(input_cur, parsers)
+            header = _format_node_header(
+                (part_cur.parent.name, part_cur.name), part_cur.repeat_n
+            )
+            if node_annotation := part_cur.annotation:
+                annotation_fmt = f"\n{_format_node_annotation(node_annotation)}"
+            else:
+                annotation_fmt = ""
+            print(f"\n{header}{annotation_fmt}")
 
-    # ---------- Query user ----------
-    query = _format_leaf_query(fld_cur)
-    v_input = input(query).strip()
+            return _get_input_result(part_cur.next, parsers, _res)
+        case Leaf():
+            query = _format_leaf_query(part_cur)
+            v_input = input(query).strip()
 
-    # Special case: undo previous input
-    if v_input == "..":
-        if not input_cur.prev:
-            print(_format_input_error("can't go to previous input"))
-            return _get_input_result(input_cur, parsers)
+            # Special cases
+            if v_input == "":
+                if part_cur.is_optional:
+                    _res.append(UserInput(None, part_cur))
+                elif any(
+                    v is not MISSING
+                    for v in (part_cur.default, part_cur.default_factory)
+                ):
+                    v = (
+                        part_cur.default
+                        if part_cur.default is not MISSING
+                        else part_cur.default_factory()
+                    )
+                    _res.append(UserInput(v, part_cur))
+                else:
+                    print(_format_input_error("must provide input"))
+                    return _get_input_result(part_cur, parsers, _res)
+            elif v_input == "..":
+                if not _res:
+                    print(_format_input_error("can't go to previous input"))
+                    return _get_input_result(part_cur, parsers, _res)
 
-        input_to_undo = input_cur.prev
-        next_input = UserInput(input_to_undo.field)
-        if link_with := input_to_undo.prev:
-            next_input.prev = link_with
-            link_with.next = next_input
-        return _get_input_result(next_input, parsers)
+                input_to_undo = _res.pop()
+                part_undo = input_to_undo.graph_part
+                if part_undo.parent != part_cur.parent:
+                    if isinstance(part_undo.parent, GraphStart):
+                        header = _format_node_header(part_undo.parent.name)
+                    else:
+                        header = _format_node_header(
+                            (part_undo.parent.parent.name, part_undo.parent.name),
+                            part_undo.parent.repeat_n,
+                        )
+                    print(f"\n{header}\n")
 
-    # Special case: choose default value
-    if v_input == "":
-        default = fld_cur.default
-        default_factory = fld_cur.default_factory
-        non_missing = [v for v in (default, default_factory) if v is not NotProvided]
-        if not non_missing:
-            print(_format_input_error("missing input"))
-            return _get_input_result(input_cur, parsers)
-        else:
-            to_parse = non_missing[0]
-            v_parsed = to_parse() if to_parse is default_factory else to_parse
-            input_cur.value = v_parsed
+                return _get_input_result(part_undo, parsers, _res)
+            else:
+                # Normal cases
+                try:
+                    v_parsed = parse_input(v_input, part_cur.type, parsers)
+                except AssertionError:
+                    raise
+                except Exception as e:
+                    print(_format_input_error(e))
+                    return _get_input_result(part_cur, parsers, _res)
+                else:
+                    _res.append(UserInput(v_parsed, part_cur))
 
-            next_input = UserInput(fld_cur.next, prev=input_cur)
-            input_cur.next = next_input
+            if repeat_entry := part_cur.repeat_entry:
+                parent_cur_fmt = f"[{_normalize_name(part_cur.parent.name)}]"
+                parent_parent_cur_fmt = (
+                    f"[{_normalize_name(part_cur.parent.parent.name)}]"
+                )
+                if _ask_yes_no(
+                    f"\n> Add another {parent_cur_fmt} to {parent_parent_cur_fmt}? (y/n): "
+                ):
+                    return _get_input_result(repeat_entry, parsers, _res)
 
-            return _get_input_result(next_input, parsers)
-
-    # Normal case
-    try:
-        input_cur.value = parse_input(v_input, fld_cur.type, parsers)
-    except AssertionError:
-        raise
-    except Exception as e:
-        print(_format_input_error(e))
-        return _get_input_result(input_cur, parsers)
-
-    # ---------- Prepare next input ----------
-    if fld_cur.repeat_from:
-        # Last leaf of list[T], tuple[T, ...], etc.
-        repeat_from_node = fld_cur.repeat_from.prev
-        if _ask_yes_no(
-            f"> Provide input for additional [{repeat_from_node.name}] (y/n)? "
-        ):
-            input_cur.next = UserInput(fld_cur.repeat_from, prev=input_cur)
-
-    if not input_cur.next:
-        input_cur.next = UserInput(input_cur.field.next, prev=input_cur)
-
-    return _get_input_result(input_cur.next, parsers)
+            return _get_input_result(part_cur.next, parsers, _res)
 
 
 def _ask_yes_no(prompt: str) -> bool:
@@ -155,14 +166,22 @@ def _format_input_error(e: Exception | str) -> str:
     return f"{RED}> Invalid input: {msg}.{RESET}"
 
 
-def _format_node_header(name: str, repeat_n: tuple[int, int] = ()) -> str:
-    name_fmt = _normalize_name(name)
+def _format_node_header(
+    schema_names: str | tuple[str, ...], repeat_n: tuple[int, int] = ()
+) -> str:
+    schema_names = (schema_names,) if isinstance(schema_names, str) else schema_names
+    names_fmt = [_normalize_name(name) for name in schema_names]
+    names_fmt = " -> ".join(name for name in names_fmt)
 
     repeat_n_fmt = ""
     if repeat_n:
         repeat_n_fmt = f" {repeat_n[0]} of {repeat_n[1]}"
 
-    return f"[{name_fmt}{repeat_n_fmt}]"
+    return f"[{names_fmt}{repeat_n_fmt}]"
+
+
+def _format_node_annotation(annotation: str) -> str:
+    return f"{GREY}# {annotation}{RESET}"
 
 
 def _normalize_name(name: str) -> str:
@@ -181,62 +200,62 @@ def _normalize_name(name: str) -> str:
     return "".join(res)
 
 
-def _format_leaf_query(f: FieldMetadata) -> str:
-    _exists = lambda x: not x is NotProvided
-
-    base, args = get_type_base_args(f.type)
-    if base is UnionType:
-        t = get_optional_non_none(f.type)
-    elif base is Annotated:
-        t = args[0]
-    else:
-        t = f.type
-
-    name_fmt = _normalize_name(f.name)
-    if (
-        base is UnionType
-        or safe_issubclass(t, (set, list, dict))
-        or f.default_factory is not NotProvided
-    ):
+def _format_leaf_query(part: Leaf) -> str:
+    name_fmt = _normalize_name(part.name)
+    if part.is_optional:
         name_fmt += "?"
 
-    t_hint_fmt = ""
-    if safe_issubclass(t, (set, list, dict)):
-        t_hint_fmt = " |val1,val2,...|"
-    elif not safe_issubclass(t, str):
-        t_hint_fmt = f" |{t.__name__}|"
+    input_hint = []
+    if t_fmt := _format_type_hint(part.type):
+        input_hint.append(t_fmt)
+    if annotation := part.annotation:
+        input_hint.append(annotation)
+    input_hint_fmt = f" <{': '.join(input_hint)}>" if input_hint else ""
 
-    annotation_fmt = ""
-    if annotation := f.annotation:
-        annotation_fmt = f" (annotation: {annotation})"
+    v_def_fmt = "" if part.default is MISSING else f" (default: {part.default})"
 
-    v_def_fmt = ""
-    if _exists(f.default):
-        v_def_fmt = f" (default: {f.default})"
-
-    return f"{name_fmt}{t_hint_fmt}{annotation_fmt}{v_def_fmt} : "
+    return f"{name_fmt}{input_hint_fmt}{v_def_fmt} : "
 
 
-def _get_child_paths(parent: KeyPath, paths: list[KeyPath]) -> list[KeyPath]:
-    res: list[KeyPath] = []
-    for path in paths:
-        if path == parent:
-            continue
-        elif path[: len(parent)] == parent:
-            res.append(path[len(parent) :])
-    return res
+def _format_type_hint(t: type) -> str:
+    base, args = get_type_base_args(t)
+    assert base not in (Annotated, UnionType)
 
+    if alt_issubclass(base, str):
+        return ""
+    elif alt_issubclass(base, dict):
+        dict_args = ["str" if arg is Any else arg.__name__ for arg in args]
+        dict_args.extend("str" for _ in range(2 - len(dict_args)))
+        return f"({', '.join(dict_args)}), ..."
+    elif alt_issubclass(base, (list, set)):
+        assert len(args) <= 1
+        if args:
+            assert not alt_issubclass(args[0], dict)
 
-def _find_next_node_i(paths: list[KeyPath], i: int):
-    prev_node = paths[i]
-    while True:
-        if i == len(paths) - 1:
-            return i
-        next_path = paths[i + 1]
-        if prev_node == next_path[: len(prev_node)]:
-            i += 1
+        if not args:
+            return "str, ..."
+        elif alt_issubclass(args[0], (list, set, tuple)):
+            return f"({_format_type_hint(args[0])}), ..."
         else:
-            return i
+            return f"{args[0].__name__}, ..."
+    elif alt_issubclass(base, tuple):
+        if not args:
+            return "str, ..."
+
+        args_fmt = []
+        for arg in args:
+            assert not alt_issubclass(arg, dict)
+            if arg is Ellipsis:
+                args_fmt.append("...")
+            elif alt_issubclass(arg, str):
+                args_fmt.append("str")
+            elif alt_issubclass(arg, (list, set, tuple)):
+                args_fmt.append(f"({_format_type_hint(arg)})")
+            else:
+                args_fmt.append(_format_type_hint(arg))
+        return ", ".join(args_fmt)
+
+    return t.__name__
 
 
 @dataclass
@@ -249,8 +268,10 @@ class Hobby:
 class Student:
     name: str
     yrs_experience: Annotated[int | None, "round down"]
-    hobbies: list[Hobby] = field(default_factory=list)
+    hobbies: Annotated[list[Hobby], "Other stuff that the student likes to do"] = field(
+        default_factory=list
+    )
 
 
-print(get_input(Student))
-# TODO: CANT ADD HOBBY
+if __name__ == "__main__":
+    get_input(Student)

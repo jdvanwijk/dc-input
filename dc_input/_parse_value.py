@@ -5,7 +5,7 @@ from typing import Annotated, Any, Literal, Union
 
 from dc_input._types import ParserFunc, ParserRegistry
 
-from dc_input._utils import get_type_base_args, safe_issubclass, get_optional_non_none
+from dc_input._utils import get_type_base_args, alt_issubclass, get_optional_non_none
 
 
 # ------------------------------------------------------------
@@ -76,7 +76,7 @@ def _coerce(value: str | list, t: Any, registry: ParserRegistry):
             return _coerce(value, elem_t, registry)
 
     # ---------- List, set (+ subclasses) ----------
-    if safe_issubclass(base, (list, set)):
+    if alt_issubclass(base, (list, set)):
         if not isinstance(value, list):
             raise ValueError(
                 "Input does not match type structure (missing parenthesis?)"
@@ -87,7 +87,7 @@ def _coerce(value: str | list, t: Any, registry: ParserRegistry):
         return base(coerced)
 
     # ---------- Tuple (+ subclasses) ----------
-    if safe_issubclass(base, tuple):
+    if alt_issubclass(base, tuple):
         if not isinstance(value, list):
             raise ValueError(
                 "Input does not match type structure (missing parenthesis?)"
@@ -109,7 +109,7 @@ def _coerce(value: str | list, t: Any, registry: ParserRegistry):
             return base(coerced)
 
     # ---------- Dict (+ subclasses) ----------
-    if safe_issubclass(base, dict):
+    if alt_issubclass(base, dict):
         if not isinstance(value, list):
             raise ValueError("dict entries must be comma-separated (k,v) pairs")
 
@@ -138,7 +138,7 @@ def _coerce(value: str | list, t: Any, registry: ParserRegistry):
 # Helpers
 # ------------------------------------------------------------
 def _is_container_type(base: Any) -> bool:
-    return safe_issubclass(base, (dict, list, set, tuple))
+    return alt_issubclass(base, (dict, list, set, tuple))
 
 
 def _parse_structure_flat(s: str) -> str:

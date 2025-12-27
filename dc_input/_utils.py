@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import is_dataclass
 from types import UnionType, NoneType
 from typing import (
@@ -11,18 +12,18 @@ from typing import (
     get_origin,
     get_args,
     Protocol,
-    Union,
+    Union, Annotated,
 )
 
-from dc_input._types import GraphStart, FieldMetadata, KeyPath
+from dc_input._types import GraphStart
 
 
 class HasPrev(Protocol):
-    prev: HasPrev
+    prev: HasNext
 
 
 class HasNext(Protocol):
-    next: HasNext
+    next: HasPrev
 
 
 T = TypeVar("T")
@@ -67,16 +68,33 @@ def get_type_base_args(t: Any) -> tuple[Any, tuple[Any, ...]]:
         return t, ()
 
 
-def safe_issubclass(
+def alt_issubclass(
     cls: type, class_or_tuple: type | UnionType | tuple[Any, ...]
 ) -> bool:
-    """Prevent TypeError when cls is not an instance of type"""
-    return isinstance(cls, type) and issubclass(cls, class_or_tuple)
+    """
+    A less strict version of issubclass from standard library:
+    - Accept UnionTypes and parameterized types
+    - Prevent throw TypeError when cls is not an instance of type (return False instead)"""
+    base, args = get_type_base_args(cls)
+    if base is Annotated:
+        base, args = get_type_base_args(args[0])
+
+    if base is UnionType:
+        base = get_optional_non_none(cls)
+
+    return isinstance(base, type) and issubclass(base, class_or_tuple)
 
 
 def is_node(t: type) -> bool:
     base, args = get_type_base_args(t)
-    return is_dataclass(base) or find_schema_in_type_args(args)
+    if base is Annotated:
+        base, args = get_type_base_args(args[0])
+
+    return (
+            is_dataclass(base)
+            or alt_issubclass(t, GraphStart)
+            or find_schema_in_type_args(args)
+    )
 
 
 def find_schema_in_type_args(args: tuple) -> type | None:
@@ -106,12 +124,14 @@ def find_schema_in_type_args(args: tuple) -> type | None:
 
 def get_optional_non_none(t: UnionType) -> type:
     base, args = get_type_base_args(t)
-    print(t, base, args)
-    # assert base is UnionType
+    if base is Annotated:
+        base, args = get_type_base_args(args[0])
+
+    assert base is UnionType
     non_none = [a for a in args if a is not NoneType]
+    assert len(non_none) == 1
 
     return non_none[0]
-
 
 
 def head(obj: V) -> V:
@@ -128,6 +148,6 @@ def tail(obj: W) -> W:
     return res
 
 
-def link(prev: FieldMetadata, cur: FieldMetadata) -> None:
+def link(prev: HasNext, cur: HasPrev) -> None:
     prev.next = cur
     cur.prev = prev

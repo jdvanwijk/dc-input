@@ -7,54 +7,48 @@ from typing import Any, get_type_hints, Union, Annotated, Literal, TypeVar, Opti
 from dc_input._types import ParserRegistry, ContainerRegistry
 from dc_input._utils import (
     get_type_base_args,
-    safe_issubclass,
+    alt_issubclass,
     is_node,
-    find_schema_in_type_args,
+    find_schema_in_type_args, get_optional_non_none,
 )
 
 T = TypeVar("T")
 
+
 def validate(
     schema: Any, parsers: ParserRegistry, containers: ContainerRegistry
 ) -> None:
-    schema_errors = [_format_err(err) for err in _get_schema_errors(schema)]
-    parser_registry_errors = [
-        _format_err(err) for err in _get_parser_registry_errors(parsers)
-    ]
-    container_registry_errors = [
-        _format_err(err) for err in _get_container_registry_errors(containers)
-    ]
+    # Collect errors
+    all_errors = {
+        "schema": _get_schema_errors(schema),
+        "parsers": _get_parser_registry_errors(parsers),
+        "containers": _get_parser_registry_errors(containers),
+    }
 
-    error_msg: list[str] = []
-    if schema_errors:
-        error_msg.append("Invalid schema:")
-        error_msg.extend(schema_errors)
-        error_msg.append("")
-    if parser_registry_errors:
-        error_msg.append("Invalid parser registry:")
-        error_msg.extend(parser_registry_errors)
-        error_msg.append("")
-    if container_registry_errors:
-        error_msg.append("Invalid container registry:")
-        error_msg.extend(container_registry_errors)
-        error_msg.append("")
+    # Format errors
+    fmt = lambda err: f"- {err}\n"
+    res: list[str] = []
+    for kind, errors in all_errors.items():
+        if errors:
+            res.append(f"\nInvalid {kind}:\n")
+            res.extend(fmt(err) for err in errors if fmt(err) not in res)
 
-    if error_msg:
-        error_msg = _remove_duplicates(error_msg)
-        raise ValueError("\n".join(error_msg))
+    if res:
+        raise ValueError("".join(res))
 
 
 def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
     """
     Enforced rules:
     - Schema:
-        * Must be a dataclass
-        * Must have at least one field
+        * must be a dataclass
+        * must have at least one field
     - Unions:
-        * Only T | None unions are allowed (other Unions are ambiguous when parsing)
-        * Use of typing.Optional is not allowed (considered deprecated, adds parsing complexity)
+        * only T | None unions are allowed (other Unions are ambiguous when parsing)
+        * use of typing.Optional is not allowed (considered deprecated, adds parsing complexity)
     - List/Set/Tuple:
         * may only nest one level (ie: list[list] is okay, list[list[list]] isn't)
+        * may not contain nested dicts (prevent poor UX)
     - Dicts:
         * may not contain nested schemas (prevent poor UX)
         * may not contain nested dicts, lists, sets, tuples (prevent poor UX)
@@ -80,7 +74,9 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
 
         # Union
         if base is Optional:
-            _errors.append(f"Optional[T] is not allowed; use T | None instead [schema: {sc.__name__}, field: '{name}']")
+            _errors.append(
+                f"Optional[T] is not allowed; use T | None instead [schema: {sc.__name__}, field: '{name}']"
+            )
             continue
         if base in (Union, UnionType):
             if NoneType not in args:
@@ -97,9 +93,8 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
                     f"[schema: {sc.__name__}, field: '{name}']"
                 )
 
-
-        # List, Set, Tuple: check max depth
-        if base in (list, set, tuple):
+        # List, Set, Tuple
+        if alt_issubclass(t, (list, set, tuple)):
             depth = _max_container_depth(t)
             if depth > 2:
                 _errors.append(
@@ -107,8 +102,17 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
                     f"[schema: {sc.__name__}, field: '{name}']"
                 )
 
+            t_to_check = get_optional_non_none(t) if base is UnionType else t
+            base_to_check, args_to_check = get_type_base_args(t_to_check)
+            if alt_issubclass(base_to_check, (list, set, tuple)):
+                if args_to_check and alt_issubclass(args_to_check[0], dict):
+                    _errors.append(
+                        f"Lists, sets and tuples may not contain nested dicts. "
+                        f"[schema: {sc.__name__}, field: '{name}']"
+                    )
+
         # Dict
-        if safe_issubclass(base, dict):
+        if alt_issubclass(t, dict):
             if any(is_node(arg) for arg in args):
                 _errors.append(
                     f"Dicts can't contain nested schemas; got {args}. "
@@ -116,14 +120,14 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
                 )
             for dict_param in args:
                 base, _ = get_type_base_args(dict_param)
-                if safe_issubclass(base, (dict, list, set, tuple)):
+                if alt_issubclass(base, (dict, list, set, tuple)):
                     _errors.append(
                         f"Dicts can't contain nested dicts, lists, sets or tuples;"
                         f" got {args}. [schema: {sc.__name__}, field: '{name}']"
                     )
 
         # Fixed-size tuples containing schemas
-        if base is tuple and find_schema_in_type_args(args):
+        if alt_issubclass(t, tuple) and find_schema_in_type_args(args):
             if not all(is_dataclass(arg) for arg in args):
                 _errors.append(
                     f"Tuple can't contain both schemas and other types; got {args}. "
@@ -203,20 +207,6 @@ def _max_container_depth(t: Any) -> int:
         return 1 + max(_max_container_depth(arg) for arg in args)
 
     return 0
-
-
-def _format_err(err: str) -> str:
-    return f"- {err}"
-
-
-def _remove_duplicates(l: list[str]) -> list[str]:
-    seen: list[str] = []
-    for v in l:
-        if v in seen and v is not "\n":
-            continue
-        seen.append(v)
-
-    return seen
 
 
 if __name__ == "__main__":
