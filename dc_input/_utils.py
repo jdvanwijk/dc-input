@@ -134,20 +134,6 @@ def get_optional_non_none(t: UnionType) -> type:
     return non_none[0]
 
 
-def head(obj: V) -> V:
-    res = obj
-    while res.prev:
-        res = res.prev
-    return res
-
-
-def tail(obj: W) -> W:
-    res = obj
-    while res.next:
-        res = res.next
-    return res
-
-
 def link(prev: HasNext, cur: HasPrev) -> None:
     prev.next = cur
     cur.prev = prev

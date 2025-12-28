@@ -12,6 +12,7 @@ class Node:
     type: type
     field_name_path: KeyPath
     annotation: str = ""
+    type_substitute: Any | None = None
     repeat_n: tuple[int, int] = ()
     parent: GraphStart | Node | None = None
     prev: GraphStart | Node | Leaf | None = None
@@ -31,6 +32,7 @@ class Leaf:
     is_optional: bool
     default: Any | Literal[_MISSING_TYPE.MISSING]
     default_factory: Any | Literal[_MISSING_TYPE.MISSING]
+    type_substitute: Any | None = None
     parent: GraphStart | Node | None = None
     prev: GraphStart | Node | Leaf | None = None
     next: Node | Leaf | GraphEnd | None = None
@@ -44,6 +46,12 @@ class Leaf:
 class GraphStart:
     name: str
     next: Node | Leaf | None = None
+    type: type = field(init=False)
+    field_name_path: KeyPath = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.type = GraphStart
+        self.field_name_path = ()
 
     def __repr__(self) -> str:
         return _format_query_part_repr(self)
@@ -77,8 +85,6 @@ def _format_query_part_repr(part: QueryGraphPart) -> str:
 class UserInput:
     value: Any
     graph_part: Leaf
-    prev: UserInput | None = None
-    next: UserInput | None = None
 
 
 # ---------- Aliases ----------

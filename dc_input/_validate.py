@@ -43,19 +43,20 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
     - Schema:
         * must be a dataclass
         * must have at least one field
+        * field type can't be None
     - Unions:
         * only T | None unions are allowed (other Unions are ambiguous when parsing)
         * use of typing.Optional is not allowed (considered deprecated, adds parsing complexity)
     - List/Set/Tuple:
         * may only nest one level (ie: list[list] is okay, list[list[list]] isn't)
-        * may not contain nested dicts (prevent poor UX)
+        * may not contain nested dicts
     - Dicts:
-        * may not contain nested schemas (prevent poor UX)
-        * may not contain nested dicts, lists, sets, tuples (prevent poor UX)
+        * may not contain nested schemas
+        * may not contain nested dicts, lists, sets, tuples
     - Fixed-size Tuple containing schemas:
-        * must contain only schemas (tuples mixing primitives and schemas cause poor UX)
+        * must contain only schemas
         * must contain at least two schemas (user should use T instead of tuple[T])
-        * must be homogeneous (mixed schema-tuples cause poor UX)
+        * must be homogeneous
     """
     if _errors is None:
         _errors = []
@@ -71,6 +72,10 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
         # Recursively validate nested schemas
         if nested := find_schema_in_type_args(args):
             _get_schema_errors(nested, _errors)
+
+        # Reject None
+        if t in (None, NoneType):
+            _errors.append(f"Field type can't be None [schema: {sc.__name__}, field: '{name}']")
 
         # Union
         if base is Optional:

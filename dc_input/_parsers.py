@@ -6,37 +6,29 @@ from dc_input._types import ParserRegistry
 
 
 # ------------------------------------------------------------
-# Default parsers for builtin primitives (and None)
+# Default parsers for builtin primitives
 # ------------------------------------------------------------
 def _parse_str(s: str) -> str:
     return s
 
 
 def _parse_int(s: str) -> int:
-    return int(s)
-
+    try:
+        return int(s)
+    except (TypeError, ValueError):
+        raise ValueError("must be a round number")
 
 def _parse_float(s: str) -> float:
-    return float(s)
-
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        raise ValueError("must be a number")
 
 def _parse_bool(s: str) -> bool:
     sl = s.strip().lower()
-    true = ("1", "true", "t", "yes", "y")
-    false = ("0", "false", "f", "no", "n")
-    if sl in true:
-        return True
-    if sl in false:
-        return False
-    raise ValueError(f"value must be in {true} for True or {false} for False")
-
-
-def _parse_none(s: str) -> None:
-    sl = s.strip().lower()
-    none = ("", "none", "null")
-    if sl in none:
-        return None
-    raise ValueError(f"value must be in {none}")
+    if sl not in ("y", "n"):
+        raise ValueError(f"must be 'y' or 'n'")
+    return sl == "y"
 
 
 # ------------------------------------------------------------
@@ -48,5 +40,4 @@ def get_default_registry() -> ParserRegistry:
         int: _parse_int,
         float: _parse_float,
         bool: _parse_bool,
-        NoneType: _parse_none,
     }

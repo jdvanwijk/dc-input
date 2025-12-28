@@ -121,7 +121,6 @@ def _collect_metadata(sc: Any, containers: ContainerRegistry) -> list[QueryGraph
 
             # Extract annotation from t
             t, annotation = _extract_annotation(t)
-
             # Label optional types, extract union_t from UnionType
             is_optional = False
             base, args = get_type_base_args(t)
@@ -132,6 +131,8 @@ def _collect_metadata(sc: Any, containers: ContainerRegistry) -> list[QueryGraph
                 is_optional = True
 
             # Substitute container-likes in registry
+            # TODO: KEEP ORIGINAL TYPE AND ADD SUBSTITUE INFO TO NODE/LEAF
+
             if t_substitue := containers.get(t):
                 t = t_substitue
 
@@ -201,9 +202,9 @@ def _expand_nested_tuples(graph: list[QueryGraphPart]) -> list[QueryGraphPart]:
     i = 0
     while i < len(graph):
         part_cur = graph[i]
-        res.append(part_cur)
 
         if not isinstance(part_cur, Node) or not _is_expandable_tuple(part_cur.type):
+            res.append(part_cur)
             i += 1
             continue
 
@@ -226,6 +227,7 @@ def _expand_nested_tuples(graph: list[QueryGraphPart]) -> list[QueryGraphPart]:
         for n in range(len(args)):
             for part in to_repeat:
                 assert isinstance(part, (Node, Leaf))
+
                 if isinstance(part, Node):
                     part_clone = Node(
                         name=part.name,
@@ -285,7 +287,8 @@ def _add_skip_repeat_edges(graph: list[QueryGraphPart]) -> list[QueryGraphPart]:
             skip_target = next(
                 part
                 for part in remaining
-                if part.field_name_path[: len(part_cur.field_name_path)]
+                if isinstance(part, GraphEnd)
+                or part.field_name_path[: len(part_cur.field_name_path)]
                 != part_cur.field_name_path
             )
             assert isinstance(skip_target, (Node, GraphEnd))
