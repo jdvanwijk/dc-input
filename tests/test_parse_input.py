@@ -4,12 +4,12 @@ import pytest
 from typing import Annotated, Any, Literal, Optional
 
 from dc_input._errors import InputError
-from dc_input._parse_value import (
+from dc_input._pipeline.run_user_session._parse_input import (
     parse_input,
     _is_container_type,
     _select_parser,
 )
-from dc_input._parsers import get_default_registry
+from dc_input._pipeline.prepare_parsers import _get_default_registry
 
 
 # TODO: Test prepare parsers
@@ -18,7 +18,7 @@ from dc_input._parsers import get_default_registry
 @pytest.fixture
 def default_registry():
     """Return the default parser registry."""
-    return get_default_registry()
+    return _get_default_registry()
 
 
 def test_annotated(default_registry):

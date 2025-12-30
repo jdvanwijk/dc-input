@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, MISSING
+import datetime
+import re
+from dataclasses import dataclass, MISSING
 from types import UnionType
 from typing import Annotated, TypeVar, Any, Literal
 
-from dc_input._parse_schema import parse_schema
-from dc_input._parse_user_inputs import parse_user_inputs
-from dc_input._parse_value import parse_input
-from dc_input._parsers import get_default_registry
+from dc_input._pipeline.build_query_graph import build_query_graph
+from dc_input._pipeline.initialize_schema import initialize_schema
+from dc_input._pipeline.run_user_session._parse_input import parse_input
+from dc_input._pipeline.prepare_parsers import prepare_parsers
 from dc_input._types import (
     ParserRegistry,
-    KeyPath,
     UserInput,
     ContainerRegistry,
     GraphEnd,
@@ -18,15 +19,15 @@ from dc_input._types import (
     QueryGraphPart,
     Node,
     Leaf,
+    NonSchemaRegistry,
 )
 from dc_input._utils import get_type_base_args, alt_issubclass
-from dc_input._validate import validate
+from dc_input._pipeline.typecheck_schema import validate
 
 BLUE = "\033[36m"
 GREEN = "\033[32m"
 GREY = "\033[90m"
 RED = "\033[31m"
-WHITE_MUTED = "\033[37m"
 
 RESET = "\033[0m"
 
@@ -37,23 +38,25 @@ T = TypeVar("T")
 def get_input(
     schema: type[T],
     *,
-    parsers: ParserRegistry | None = None,
     containers: ContainerRegistry | None = None,
+    non_schemas: NonSchemaRegistry | None = None,
+    parsers: ParserRegistry | None = None,
 ) -> T:
-    parsers = parsers or {}
     containers = containers or {}
+    non_schemas = non_schemas or []
+    parsers = parsers or {}
 
-    validate(schema, parsers, containers)
+    validate(schema, parsers, containers, non_schemas)
 
-    graph_head = parse_schema(schema, containers)
-    parsers = get_default_registry() | parsers
+    graph_head = build_query_graph(schema, containers, non_schemas)
+    parsers = prepare_parsers(parsers)
     result = _get_input_result(graph_head, parsers)
 
     for res in result:
         print(res)
         print(res.graph_part.parent)
         print()
-    return parse_user_inputs(schema, result)
+    return initialize_schema(schema, result)
 
 
 def _get_input_result(
@@ -73,23 +76,25 @@ def _get_input_result(
             return _res
         case Node():
             if skip_target := part_cur.skip_target:
+                if node_annotation := part_cur.annotation:
+                    annotation_fmt = f"\n{_format_node_annotation(node_annotation)}"
+                else:
+                    annotation_fmt = "\n"
+                print(annotation_fmt)
+
                 cur_fmt = f"[{_normalize_name(part_cur.name)}]"
                 parent_fmt = f"[{_normalize_name(part_cur.parent.name)}]"
                 repeats_fmt = f" ({part_cur.repeat_n[1]})" if part_cur.repeat_n else ""
                 query = _format_control_flow_query(
                     f"Add {cur_fmt}{repeats_fmt} to {parent_fmt}?"
                 )
-                if not _ask_yes_no(f"\n{query}"):
+                if not _ask_yes_no(f"{query}"):
                     return _get_input_result(skip_target, parsers, _res)
 
             header = _format_node_header(part_cur)
-            if node_annotation := part_cur.annotation:
-                annotation_fmt = f"\n{_format_node_annotation(node_annotation)}"
-            else:
-                annotation_fmt = ""
-            print(f"\n{header}{annotation_fmt}")
-
+            print(f"\n{header}")
             return _get_input_result(part_cur.next, parsers, _res)
+
         case Leaf():
             query = _format_leaf_query(part_cur)
             v_input = input(query).strip()
@@ -177,7 +182,7 @@ def _format_node_header(node: GraphStart | Node) -> str:
     location_cur = _normalize_name(node.name)
     if isinstance(node, Node):
         location_cur = (
-            f"{WHITE_MUTED}{_normalize_name(node.parent.name)} ->{RESET} {location_cur}"
+            f"{location_cur}{GREY} <- {_normalize_name(node.parent.name)}{RESET}"
         )
 
     repeat_n_fmt = ""
@@ -275,26 +280,87 @@ def _format_type_hint(t: type) -> str:
     return t.__name__
 
 
-@dataclass
-class Inner:
-    test: str
+def parse_date_dmy(s: str) -> datetime.date:
+    match = re.match(
+        r"(?P<day>\d{2})[\-./](?P<month>\d{2})[\-./](?P<year>\d{4})$", s.strip()
+    )
+    try:
+        day = int(match.group("day"))
+        month = int(match.group("month"))
+        year = int(match.group("year"))
+    except Exception:
+        raise ValueError("wrong format")
+    else:
+        return datetime.date(year, month, day)
 
 
 @dataclass
-class Hobby:
-    name: str
-    yrs_experience: int | None
-    inner: Inner
+class IBAN:
+    iban: str
+    bank_code: int
+    account_number: int
+
+
+def parse_iban_german(iban: str) -> IBAN:
+    iban = iban.strip().upper().replace(" ", "")
+    if match := re.match(
+        r"DE\d{2}(?P<bank_code>\d{8})(?P<account_number>\d{10})$", iban
+    ):
+        return IBAN(
+            iban=iban,
+            bank_code=match["bank_code"],
+            account_number=match["account_number"],
+        )
+    else:
+        raise ValueError("wrong format")
+
+
+class ZipCode(int):
+    pass
+
+
+def parse_zip_code_german(zip_code: str) -> ZipCode:
+    zip_code = zip_code.strip()
+    if re.match(r"\d{5}$", zip_code):
+        return ZipCode(int(zip_code))
+    else:
+        raise ValueError("wrong format")
 
 
 @dataclass
-class Student:
-    yrs_experience: Annotated[int | None, "round down"]
-    name: str = field(default="petertje")
-    hobbies: Annotated[
-        list[Hobby] | None, "Other stuff that the student likes to do"
-    ] = field(default_factory=list)
+class Address:
+    street: str
+    street_number: int
+    apartment: str | None
+    zip_code: Annotated[ZipCode, "XXXXX"]
+    city: str = "Leipzig"
+
+
+@dataclass
+class Name:
+    first: str
+    middle: list[str]
+    last: str
+
+
+@dataclass(kw_only=True)
+class MusicStudent:
+    name: Name
+    address: Address
+    date_of_birth: Annotated[datetime.date, "DD/MM/YYYY"]
+
+
+# TODO: SETTINGS: print help header, print n previous nodes in header, automatically reorder fields or not
+# TODO: Print path name with nodes as well because this may contain metadata
 
 
 if __name__ == "__main__":
-    get_input(Student)
+    parsers = {
+        datetime.date: parse_date_dmy,
+        IBAN: parse_iban_german,
+        ZipCode: parse_zip_code_german,
+    }
+
+    non_schemas = [IBAN]
+
+    get_input(MusicStudent, parsers=parsers, non_schemas=non_schemas)

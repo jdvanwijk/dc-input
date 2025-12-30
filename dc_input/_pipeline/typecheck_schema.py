@@ -4,25 +4,27 @@ from dataclasses import is_dataclass, dataclass, fields
 from types import UnionType, NoneType
 from typing import Any, get_type_hints, Union, Annotated, Literal, TypeVar, Optional
 
-from dc_input._types import ParserRegistry, ContainerRegistry
+from dc_input._types import ParserRegistry, ContainerRegistry, NonSchemaRegistry
 from dc_input._utils import (
     get_type_base_args,
     alt_issubclass,
-    is_node,
-    find_schema_in_type_args, get_optional_non_none,
+    find_schema_in_type,
+    get_optional_non_none,
 )
 
 T = TypeVar("T")
 
+def typecheck_schema(): pass
 
 def validate(
-    schema: Any, parsers: ParserRegistry, containers: ContainerRegistry
+    schema: Any, parsers: ParserRegistry, containers: ContainerRegistry, non_schemas: NonSchemaRegistry
 ) -> None:
     # Collect errors
     all_errors = {
-        "schema": _get_schema_errors(schema),
+        "schema": _get_schema_errors(schema, non_schemas),
         "parsers": _get_parser_registry_errors(parsers),
         "containers": _get_parser_registry_errors(containers),
+        "non_schemas": _get_non_schema_registry_errors(non_schemas)
     }
 
     # Format errors
@@ -37,7 +39,7 @@ def validate(
         raise ValueError("".join(res))
 
 
-def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
+def _get_schema_errors(sc: Any, non_schemas: NonSchemaRegistry, _errors: list[str] | None = None) -> list[str]:
     """
     Enforced rules:
     - Schema:
@@ -70,12 +72,15 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
         base, args = get_type_base_args(t)
 
         # Recursively validate nested schemas
-        if nested := find_schema_in_type_args(args):
-            _get_schema_errors(nested, _errors)
+        for arg in args:
+            if nested := find_schema_in_type(arg, non_schemas):
+                _get_schema_errors(nested, _errors)
 
         # Reject None
         if t in (None, NoneType):
-            _errors.append(f"Field type can't be None [schema: {sc.__name__}, field: '{name}']")
+            _errors.append(
+                f"Field type can't be None [schema: {sc.__name__}, field: '{name}']"
+            )
 
         # Union
         if base is Optional:
@@ -118,7 +123,7 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
 
         # Dict
         if alt_issubclass(t, dict):
-            if any(is_node(arg) for arg in args):
+            if any(find_schema_in_type(arg, non_schemas) for arg in args):
                 _errors.append(
                     f"Dicts can't contain nested schemas; got {args}. "
                     f"[schema: {sc.__name__}, field: '{name}']"
@@ -132,7 +137,7 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
                     )
 
         # Fixed-size tuples containing schemas
-        if alt_issubclass(t, tuple) and find_schema_in_type_args(args):
+        if alt_issubclass(t, tuple) and find_schema_in_type(t, non_schemas):
             if not all(is_dataclass(arg) for arg in args):
                 _errors.append(
                     f"Tuple can't contain both schemas and other types; got {args}. "
@@ -187,6 +192,11 @@ def _get_parser_registry_errors(registry: ParserRegistry) -> list[str]:
 
 
 def _get_container_registry_errors(registry: ContainerRegistry) -> list[str]:
+    # TODO: IMPLEMENT
+    return []
+
+
+def _get_non_schema_registry_errors(registry: NonSchemaRegistry) -> list[str]:
     # TODO: IMPLEMENT
     return []
 

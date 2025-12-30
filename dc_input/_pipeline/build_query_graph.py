@@ -30,7 +30,7 @@ Key ideas:
 
 from __future__ import annotations
 
-from dataclasses import fields, is_dataclass, MISSING, Field, dataclass, make_dataclass
+from dataclasses import fields, is_dataclass, Field, dataclass, make_dataclass
 from types import UnionType, NoneType
 from typing import Any, TypeVar, get_type_hints, Annotated
 
@@ -42,11 +42,11 @@ from dc_input._types import (
     GraphEnd,
     GraphStart,
     QueryGraphPart,
+    NonSchemaRegistry,
 )
 from dc_input._utils import (
     get_type_base_args,
-    find_schema_in_type_args,
-    is_node,
+    find_schema_in_type,
     alt_issubclass,
     get_optional_non_none,
     link,
@@ -55,7 +55,9 @@ from dc_input._utils import (
 T = TypeVar("T")
 
 
-def parse_schema(sc: Any, containers: ContainerRegistry | None = None) -> GraphStart:
+def build_query_graph(
+    sc: Any, containers: ContainerRegistry, non_schemas: NonSchemaRegistry
+) -> GraphStart:
     """
     Parse a schema dataclass into a query graph.
 
@@ -84,11 +86,9 @@ def parse_schema(sc: Any, containers: ContainerRegistry | None = None) -> GraphS
     assert is_dataclass(sc)
     assert isinstance(containers, dict) or containers is None
 
-    containers = containers or {}
-
-    first_pass = _collect_metadata(sc, containers)
-    second_pass = _expand_nested_tuples(first_pass)
-    third_pass = _add_skip_repeat_edges(second_pass)
+    first_pass = _collect_metadata(sc, containers, non_schemas)
+    second_pass = _expand_nested_tuples(first_pass, non_schemas)
+    third_pass = _add_skip_repeat_edges(second_pass, non_schemas)
     fourth_pass = _link_graph(third_pass)
 
     assert isinstance(fourth_pass, GraphStart)
@@ -96,7 +96,9 @@ def parse_schema(sc: Any, containers: ContainerRegistry | None = None) -> GraphS
     return fourth_pass
 
 
-def _collect_metadata(sc: Any, containers: ContainerRegistry) -> list[QueryGraphPart]:
+def _collect_metadata(
+    sc: Any, containers: ContainerRegistry, non_schemas: NonSchemaRegistry
+) -> list[QueryGraphPart]:
     """
     Collect metadata for all the fields of the schema.
     """
@@ -104,6 +106,7 @@ def _collect_metadata(sc: Any, containers: ContainerRegistry) -> list[QueryGraph
     def _collect(
         sc: Any,
         containers: ContainerRegistry,
+        non_schemas: NonSchemaRegistry,
         parent: GraphStart | Node,
         _res: list[Node | Leaf] | None = None,
         _field_name_path: KeyPath = (),
@@ -115,7 +118,8 @@ def _collect_metadata(sc: Any, containers: ContainerRegistry) -> list[QueryGraph
         nodes: list[tuple[str, Any]] = []
         for fld_name, t in type_hints.items():
             # Defer nested schemas for intuitive query flow
-            if is_node(t):
+            print(fld_name, t)
+            if find_schema_in_type(t, non_schemas):
                 nodes.append((fld_name, t))
                 continue
 
@@ -166,7 +170,9 @@ def _collect_metadata(sc: Any, containers: ContainerRegistry) -> list[QueryGraph
             # Get nested schema and name
             base, args = get_type_base_args(t)
             schema_nested = (
-                base if is_dataclass(base) else find_schema_in_type_args(args)
+                base
+                if is_dataclass(base)
+                else find_schema_in_type(t, non_schemas)
             )
             name = schema_nested.__name__
 
@@ -185,6 +191,7 @@ def _collect_metadata(sc: Any, containers: ContainerRegistry) -> list[QueryGraph
             _collect(
                 schema_nested,
                 containers,
+                non_schemas,
                 new_node,
                 _res,
                 new_node.field_name_path,
@@ -193,17 +200,17 @@ def _collect_metadata(sc: Any, containers: ContainerRegistry) -> list[QueryGraph
         return _res
 
     start = GraphStart(name=sc.__name__)
-    return [start] + _collect(sc, containers, start) + [GraphEnd()]
+    return [start] + _collect(sc, containers, non_schemas, start) + [GraphEnd()]
 
 
-def _expand_nested_tuples(graph: list[QueryGraphPart]) -> list[QueryGraphPart]:
+def _expand_nested_tuples(graph: list[QueryGraphPart], non_schemas: NonSchemaRegistry) -> list[QueryGraphPart]:
     res: list[QueryGraphPart] = []
 
     i = 0
     while i < len(graph):
         part_cur = graph[i]
 
-        if not isinstance(part_cur, Node) or not _is_expandable_tuple(part_cur.type):
+        if not isinstance(part_cur, Node) or not _is_expandable_tuple(part_cur.type, non_schemas):
             res.append(part_cur)
             i += 1
             continue
@@ -256,7 +263,7 @@ def _expand_nested_tuples(graph: list[QueryGraphPart]) -> list[QueryGraphPart]:
     return res
 
 
-def _add_skip_repeat_edges(graph: list[QueryGraphPart]) -> list[QueryGraphPart]:
+def _add_skip_repeat_edges(graph: list[QueryGraphPart], non_schemas: NonSchemaRegistry) -> list[QueryGraphPart]:
     res: list[QueryGraphPart] = []
 
     for i, part_cur in enumerate(graph):
@@ -269,7 +276,7 @@ def _add_skip_repeat_edges(graph: list[QueryGraphPart]) -> list[QueryGraphPart]:
 
         # Fields that do not contain schemas do not need further processing
         base, args = get_type_base_args(part_cur.type)
-        if not find_schema_in_type_args(args):
+        if not find_schema_in_type(part_cur.type, non_schemas):
             res.append(part_cur)
             continue
 
@@ -280,7 +287,7 @@ def _add_skip_repeat_edges(graph: list[QueryGraphPart]) -> list[QueryGraphPart]:
         # ------------------------------------------------------------------
         if (
             base is UnionType
-            and _is_expandable_tuple(part_cur.type)
+            and _is_expandable_tuple(part_cur.type, non_schemas)
             and part_cur.repeat_n[0] == 1
         ):
             remaining = graph[i + 1 :]
@@ -301,7 +308,7 @@ def _add_skip_repeat_edges(graph: list[QueryGraphPart]) -> list[QueryGraphPart]:
         # ------------------------------------------------------------------
         if base is UnionType or alt_issubclass(base, (list, set, tuple)):
             # Expandable tuple does not need further processing, already expanded
-            if _is_expandable_tuple(part_cur.type):
+            if _is_expandable_tuple(part_cur.type, non_schemas):
                 res.append(part_cur)
                 continue
 
@@ -361,14 +368,14 @@ def _is_child(parent: KeyPath, child: KeyPath) -> bool:
     return parent != child and parent == child[: len(parent)]
 
 
-def _is_expandable_tuple(t: type | UnionType) -> bool:
+def _is_expandable_tuple(t: type | UnionType, non_schemas: NonSchemaRegistry) -> bool:
     base, args = get_type_base_args(t)
     if base is UnionType:
         base = get_optional_non_none(t)
     return (
-        alt_issubclass(base, tuple)
-        and find_schema_in_type_args(args)
-        and Ellipsis not in args
+            alt_issubclass(base, tuple)
+            and find_schema_in_type(t, non_schemas)
+            and Ellipsis not in args
     )
 
 
@@ -445,7 +452,7 @@ if __name__ == "__main__":
         # Leaf after heavy nesting (ordering stress)
         founded_year: int
 
-    res = parse_schema(Company)
+    res = build_query_graph(Company)
 
     cur = res
     i = 0

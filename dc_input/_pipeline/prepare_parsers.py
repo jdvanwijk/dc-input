@@ -31,13 +31,16 @@ def _parse_bool(s: str) -> bool:
     return sl == "y"
 
 
-# ------------------------------------------------------------
-# Main function
-# ------------------------------------------------------------
-def get_default_registry() -> ParserRegistry:
+def _get_default_registry() -> ParserRegistry:
     return {
         str: _parse_str,
         int: _parse_int,
         float: _parse_float,
         bool: _parse_bool,
     }
+
+# ------------------------------------------------------------
+# Main function
+# ------------------------------------------------------------
+def prepare_parsers(custom: ParserRegistry) -> ParserRegistry:
+    return _get_default_registry() | custom

@@ -8,7 +8,7 @@ from typing import TypeVar, Any
 T = TypeVar("T")
 
 
-def parse_user_inputs(schema: type[T], inputs: list[UserInput]) -> T:
+def initialize_schema(schema: type[T], inputs: list[UserInput]) -> T:
     assert is_dataclass(schema)
     assert inputs
 

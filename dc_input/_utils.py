@@ -15,7 +15,7 @@ from typing import (
     Union, Annotated,
 )
 
-from dc_input._types import GraphStart
+from dc_input._types import GraphStart, NonSchemaRegistry
 
 
 class HasPrev(Protocol):
@@ -79,60 +79,55 @@ def alt_issubclass(
     if base is Annotated:
         base, args = get_type_base_args(args[0])
 
-    if base is UnionType:
+    if base is UnionType and NoneType in args:
         base = get_optional_non_none(cls)
 
     return isinstance(base, type) and issubclass(base, class_or_tuple)
 
 
-def is_node(t: type) -> bool:
+def find_schema_in_type(t: type | UnionType, non_schemas: NonSchemaRegistry) -> type | None:
+    # TODO: Refactor call sites to pass t instead of args of t
+
     base, args = get_type_base_args(t)
     if base is Annotated:
         base, args = get_type_base_args(args[0])
 
-    return (
-            is_dataclass(base)
-            or alt_issubclass(t, GraphStart)
-            or find_schema_in_type_args(args)
-    )
+    if base in non_schemas:
+        return None
 
+    # Direct schema
+    if is_dataclass(base):
+        return t
 
-def find_schema_in_type_args(args: tuple) -> type | None:
-    for arg in args:
-        # Direct schema
-        if is_dataclass(arg):
-            return arg
+    # UnionType
+    if base in (Union, UnionType):
+        non_none = get_optional_non_none(t)
+        if found := find_schema_in_type(non_none, non_schemas):
+            return found
 
-        base, sub_args = get_type_base_args(arg)
-
-        # Union / Optional
-        if base in (Union, UnionType):
-            non_none = [a for a in sub_args if a is not NoneType]
-            if non_none:
-                found = find_schema_in_type_args(tuple(non_none))
-                if found:
-                    return found
-
-        # Containers: tuple, list, set, etc.
-        elif sub_args:
-            found = find_schema_in_type_args(sub_args)
-            if found:
+    # List, Set, Tuple
+    if alt_issubclass(base, (list, set, tuple)):
+        for arg in args:
+            if found := find_schema_in_type(arg, non_schemas):
                 return found
 
     return None
 
 
-def get_optional_non_none(t: UnionType) -> type:
+def get_optional_non_none(t: type | UnionType) -> type:
     base, args = get_type_base_args(t)
+
     if base is Annotated:
         base, args = get_type_base_args(args[0])
 
-    assert base is UnionType
-    non_none = [a for a in args if a is not NoneType]
-    assert len(non_none) == 1
+    if base is not UnionType:
+        return t
 
+    if len(args) != 2 or NoneType not in args:
+        raise ValueError(f"Not Optional[T]: {t}")
+
+    non_none = [a for a in args if a not in (NoneType, None)]
     return non_none[0]
-
 
 def link(prev: HasNext, cur: HasPrev) -> None:
     prev.next = cur

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Container
 from dataclasses import dataclass, field, _MISSING_TYPE, fields
 from typing import Any, Literal
 
@@ -90,6 +90,7 @@ class UserInput:
 # ---------- Aliases ----------
 ContainerRegistry = dict[type, type]
 KeyPath = tuple[str, ...]  # Path to a specific schema field
+NonSchemaRegistry = Container[object]
 ParserFunc = Callable[[str], Any]  # Used to parse a user input value
 ParserRegistry = dict[type, ParserFunc]  # Stores value parsers
 QueryGraphPart = GraphStart | Node | Leaf | GraphEnd
