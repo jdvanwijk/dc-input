@@ -5,6 +5,7 @@ from typing import Union
 from dc_input._errors import SchemaError
 from dc_input._pipeline.build_query_graph import build_query_graph
 
+# TODO: REDO TESTS
 
 class TestInvalidSchema:
     def test_non_dataclass(self):

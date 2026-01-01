@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
 from dataclasses import is_dataclass
 from types import UnionType, NoneType
 from typing import (
@@ -12,10 +11,11 @@ from typing import (
     get_origin,
     get_args,
     Protocol,
-    Union, Annotated,
+    Union,
+    Annotated,
 )
 
-from dc_input._types import GraphStart, NonSchemaRegistry
+from dc_input._types import NonSchemaRegistry
 
 
 class HasPrev(Protocol):
@@ -74,7 +74,8 @@ def alt_issubclass(
     """
     A less strict version of issubclass from standard library:
     - Accept UnionTypes and parameterized types
-    - Prevent throw TypeError when cls is not an instance of type (return False instead)"""
+    - Prevent throw TypeError when cls is not an instance of type (return False instead)
+    """
     base, args = get_type_base_args(cls)
     if base is Annotated:
         base, args = get_type_base_args(args[0])
@@ -85,9 +86,9 @@ def alt_issubclass(
     return isinstance(base, type) and issubclass(base, class_or_tuple)
 
 
-def find_schema_in_type(t: type | UnionType, non_schemas: NonSchemaRegistry) -> type | None:
-    # TODO: Refactor call sites to pass t instead of args of t
-
+def find_schema_in_type(
+    t: type | UnionType, non_schemas: NonSchemaRegistry
+) -> type | None:
     base, args = get_type_base_args(t)
     if base is Annotated:
         base, args = get_type_base_args(args[0])
@@ -127,7 +128,9 @@ def get_optional_non_none(t: type | UnionType) -> type:
         raise ValueError(f"Not Optional[T]: {t}")
 
     non_none = [a for a in args if a not in (NoneType, None)]
+
     return non_none[0]
+
 
 def link(prev: HasNext, cur: HasPrev) -> None:
     prev.next = cur

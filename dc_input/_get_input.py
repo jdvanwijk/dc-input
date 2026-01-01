@@ -6,10 +6,16 @@ from dataclasses import dataclass, MISSING
 from types import UnionType
 from typing import Annotated, TypeVar, Any, Literal
 
-from dc_input._pipeline.build_query_graph import build_query_graph
-from dc_input._pipeline.initialize_schema import initialize_schema
-from dc_input._pipeline.run_user_session._parse_input import parse_input
-from dc_input._pipeline.prepare_parsers import prepare_parsers
+from _pipeline import (
+    build_query_graph,
+    initialize_schema,
+    prepare_parsers,
+    run_user_session,
+    typecheck_schema,
+    validate_user_definitions,
+)
+from dc_input._pipeline import normalize_schema
+
 from dc_input._types import (
     ParserRegistry,
     UserInput,
@@ -22,7 +28,6 @@ from dc_input._types import (
     NonSchemaRegistry,
 )
 from dc_input._utils import get_type_base_args, alt_issubclass
-from dc_input._pipeline.typecheck_schema import validate
 
 BLUE = "\033[36m"
 GREEN = "\033[32m"
@@ -33,6 +38,25 @@ RESET = "\033[0m"
 
 
 T = TypeVar("T")
+
+
+def get_input(
+    schema: type[T],
+    *,
+    containers: ContainerRegistry | None = None,
+    non_schemas: NonSchemaRegistry | None = None,
+    parsers: ParserRegistry | None = None,
+) -> T:
+    containers = containers or {}
+    non_schemas = non_schemas or []
+    parsers = parsers or {}
+
+    validate_user_definitions(schema, containers, non_schemas, parsers)
+    schema_nm = normalize_schema(schema)
+    query_graph = build_query_graph(schema_nm, containers, non_schemas)
+    session_result = run_user_session(query_graph, parsers)
+
+    return initialize_schema(session_result)
 
 
 def get_input(

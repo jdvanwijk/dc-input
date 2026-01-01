@@ -1,1 +1,0 @@
-def canonicalize(): pass

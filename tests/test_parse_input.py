@@ -12,7 +12,7 @@ from dc_input._pipeline.run_user_session._parse_input import (
 from dc_input._pipeline.prepare_parsers import _get_default_registry
 
 
-# TODO: Test prepare parsers
+# TODO: REDO TESTS
 
 
 @pytest.fixture

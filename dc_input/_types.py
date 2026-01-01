@@ -1,8 +1,63 @@
 from __future__ import annotations
 
+from abc import ABC
 from collections.abc import Callable, Container
 from dataclasses import dataclass, field, _MISSING_TYPE, fields
 from typing import Any, Literal
+
+
+# ---------- NormalizedField ----------
+@dataclass
+class NormalizedField:
+    type: type
+    default: Any | Literal[_MISSING_TYPE.MISSING]
+    default_factory: Callable[[], Any] | Literal[_MISSING_TYPE.MISSING]
+    annotation: str | None
+
+    shape: FieldShape
+
+
+@dataclass(frozen=True)
+class FieldShape(ABC):
+    is_optional: bool
+
+
+@dataclass(frozen=True)
+class LeafShape(FieldShape):
+    value_type: type
+
+
+@dataclass(frozen=True)
+class SchemaShape(FieldShape):
+    schema_type: type
+
+
+@dataclass(frozen=True)
+class ContainerShape(FieldShape):
+    container_type: type
+    element: FieldShape
+
+
+@dataclass(frozen=True)
+class FixedTupleShape(FieldShape):
+    elements: tuple[LeafShape | FixedTupleShape, ...]
+
+
+@dataclass(frozen=True)
+class FixedSchemaTupleShape(FieldShape):
+    schema_type: type
+    length: int
+
+
+@dataclass(frozen=True)
+class DictShape(FieldShape):
+    key: LeafShape
+    value: LeafShape
+
+
+@dataclass(frozen=True)
+class LiteralShape(FieldShape):
+    values: tuple[Any, ...]
 
 
 # ---------- Structs ----------
@@ -91,6 +146,7 @@ class UserInput:
 ContainerRegistry = dict[type, type]
 KeyPath = tuple[str, ...]  # Path to a specific schema field
 NonSchemaRegistry = Container[object]
+NormalizedSchema = dict[KeyPath, NormalizedField]
 ParserFunc = Callable[[str], Any]  # Used to parse a user input value
 ParserRegistry = dict[type, ParserFunc]  # Stores value parsers
 QueryGraphPart = GraphStart | Node | Leaf | GraphEnd

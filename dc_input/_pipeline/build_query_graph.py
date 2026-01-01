@@ -83,6 +83,8 @@ def build_query_graph(
     FieldMetadata
         The head of the query graph.
     """
+    # TODO: Completely redo module after normalized schemas
+
     assert is_dataclass(sc)
     assert isinstance(containers, dict) or containers is None
 
@@ -135,7 +137,6 @@ def _collect_metadata(
                 is_optional = True
 
             # Substitute container-likes in registry
-            # TODO: KEEP ORIGINAL TYPE AND ADD SUBSTITUE INFO TO NODE/LEAF
 
             if t_substitue := containers.get(t):
                 t = t_substitue
