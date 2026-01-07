@@ -3,7 +3,7 @@ from dataclasses import dataclass, is_dataclass, field
 from typing import Union
 
 from dc_input._errors import SchemaError
-from dc_input._pipeline.build_query_graph import build_query_graph
+from dc_input._pipeline.build_session_graph import build_session_graph
 
 # TODO: REDO TESTS
 
@@ -13,7 +13,7 @@ class TestInvalidSchema:
             pass
 
         with pytest.raises(SchemaError):
-            build_query_graph(Invalid)
+            build_session_graph(Invalid)
 
     def test_union_non_optional(self):
         @dataclass
@@ -21,7 +21,7 @@ class TestInvalidSchema:
             a: Union[str, int]
 
         with pytest.raises(SchemaError):
-            build_query_graph(Invalid)
+            build_session_graph(Invalid)
 
     def test_union_multiple_non_none(self):
         @dataclass
@@ -29,7 +29,7 @@ class TestInvalidSchema:
             a: Union[str, int, None]
 
         with pytest.raises(SchemaError):
-            build_query_graph(Invalid)
+            build_session_graph(Invalid)
 
 
 def test_simple_schema():
@@ -38,7 +38,7 @@ def test_simple_schema():
         name: str
         age: int
 
-    sc_dict, metadata = build_query_graph(Simple)
+    sc_dict, metadata = build_session_graph(Simple)
 
     # sc_dict has string keys at each level
     assert "name" in sc_dict
@@ -60,7 +60,7 @@ def test_nested_schema():
         name: str
         inner: Inner
 
-    sc_dict, metadata = build_query_graph(Outer)
+    sc_dict, metadata = build_session_graph(Outer)
 
     # sc_dict structure
     assert "name" in sc_dict
@@ -91,7 +91,7 @@ def test_deeply_nested_schema():
         top: bool
         level2: Level2
 
-    sc_dict, metadata = build_query_graph(Level1)
+    sc_dict, metadata = build_session_graph(Level1)
 
     # Check nested dict structure
     assert isinstance(sc_dict["level2"]["level3"], dict)
@@ -113,7 +113,7 @@ def test_default_values():
         count: int = 0
         items: list[str] = field(default_factory=list)
 
-    sc_dict, metadata = build_query_graph(Schema)
+    sc_dict, metadata = build_session_graph(Schema)
 
     assert metadata[("name",)].default == "default"
     assert metadata[("count",)].default == 0
@@ -136,7 +136,7 @@ def test_leaves_in_metadata_before_nodes():
         node: Inner
         leaf2: int
 
-    _, mdata_dict = build_query_graph(Outer)
+    _, mdata_dict = build_session_graph(Outer)
     mdata_fields = list(mdata_dict.values())
 
     assert not any(is_dataclass(mdata.type) for mdata in mdata_fields[:2])

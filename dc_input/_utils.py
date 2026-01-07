@@ -10,26 +10,14 @@ from typing import (
     Any,
     get_origin,
     get_args,
-    Protocol,
     Union,
     Annotated,
 )
 
-from dc_input._types import NonSchemaRegistry
-
-
-class HasPrev(Protocol):
-    prev: HasNext
-
-
-class HasNext(Protocol):
-    next: HasPrev
-
+from dc_input._types import KeyPath
 
 T = TypeVar("T")
 U = TypeVar("U")
-V = TypeVar("V", bound=HasPrev)
-W = TypeVar("W", bound=HasNext)
 
 
 def rgetitem(d: Mapping[T, U], ks: Iterable[T]) -> U:
@@ -86,15 +74,10 @@ def alt_issubclass(
     return isinstance(base, type) and issubclass(base, class_or_tuple)
 
 
-def find_schema_in_type(
-    t: type | UnionType, non_schemas: NonSchemaRegistry
-) -> type | None:
+def find_schema_in_type(t: type | UnionType) -> type | None:
     base, args = get_type_base_args(t)
     if base is Annotated:
         base, args = get_type_base_args(args[0])
-
-    if base in non_schemas:
-        return None
 
     # Direct schema
     if is_dataclass(base):
@@ -103,13 +86,13 @@ def find_schema_in_type(
     # UnionType
     if base in (Union, UnionType):
         non_none = get_optional_non_none(t)
-        if found := find_schema_in_type(non_none, non_schemas):
+        if found := find_schema_in_type(non_none):
             return found
 
     # List, Set, Tuple
     if alt_issubclass(base, (list, set, tuple)):
         for arg in args:
-            if found := find_schema_in_type(arg, non_schemas):
+            if found := find_schema_in_type(arg):
                 return found
 
     return None
@@ -132,6 +115,5 @@ def get_optional_non_none(t: type | UnionType) -> type:
     return non_none[0]
 
 
-def link(prev: HasNext, cur: HasPrev) -> None:
-    prev.next = cur
-    cur.prev = prev
+def is_child_path(parent: KeyPath, child: KeyPath) -> bool:
+    return parent != child and parent == child[: len(parent)]

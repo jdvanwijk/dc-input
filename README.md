@@ -3,117 +3,146 @@
 [![PyPI](https://img.shields.io/pypi/v/dc-input.svg)](https://pypi.org/project/dc-input/)
 [![License](https://img.shields.io/github/license/jdvanwijk/dc-input.svg)](LICENSE)
 
-A tiny, dependency-free library that lets you **interactively fill dataclass instances** via the command line.
+**Interactively fill dataclass instances via the command line.** 
+Features include nested schemas, repeatable containers, undo support, defaults, optional fields, and custom parsers.
 Useful for quick data entry, prototyping, or structured configuration; integrates easily with your own CLI tools.
 ---
-
-## Features
-- Supports defaults and nested dataclasses
-- Supports custom parsers
-- Structures prompts to flow naturally through nested structures
----
-
 ## Installation
 ```bash
-pip install dc_input
+pip install dc-input
 ```
 ---
 
 ## Usage
-
+Define your dataclasses as usual, then call `get_input()` to interactively collect values:
 ```python
+from __future__ import annotations
+
 from dataclasses import dataclass
-from datetime import date
+import datetime
+from pprint import pprint
+import re
+from typing import Annotated
 
-from dc_input import from_dataclass
-
-
-# --- Setup custom parsers as required  ---
-def _parse_bool(s: str) -> bool:
-    if s.lower() in ("y", "yes", "1", "true", "t"):
-        return True
-    elif s.lower() in ("n", "no", "0", "false", "f"):
-        return False
-    raise ValueError(f"Can't parse {s!r}")
+from dc_input import get_input
 
 
-parsers = {
-    bool: _parse_bool,
-    date: lambda s: date.fromisoformat(s)
-}
+@dataclass
+class MusicStudent:
+    name: Name
+    date_of_birth: Annotated[datetime.date, "DD/MM/YYYY"]
+    address: Annotated[Address, "Must be a German address"]
+
+    primary_instrument: Instrument
+    secondary_instruments: Annotated[
+        list[Instrument], "Other instruments the student may have experience with"
+    ]
+
+    comments: str | None
 
 
-# --- Example dataclass schema with nesting and defaults ---
+@dataclass
+class Name:
+    first: str
+    middle: list[str]
+    last: str
+
+
 @dataclass
 class Address:
-    city: str
-    postal_code: str
-    country: str = "Germany"
+    street: str
+    street_number: int
+    apartment: str | None
+    zip_code: Annotated[int, "XXXXX"]
+    city: str = "Berlin"
 
 
 @dataclass
-class Employee:
+class Instrument:
     name: str
-    birthdate: date
-    address: Address
-    active: bool = True
+    start_date: Annotated[datetime.date | None, "DD/MM/YY"]
+    comments: str | None
 
 
-# --- Use the CLI to fill in all values interactively ---
+def parse_date_dmy(s: str) -> datetime.date:
+    match = re.match(
+        r"(?P<day>\d{1,2})[\-./](?P<month>\d{1,2})[\-./](?P<year>\d{4})$", s.strip()
+    )
+    try:
+        day = int(match.group("day"))
+        month = int(match.group("month"))
+        year = int(match.group("year"))
+    except Exception:
+        raise ValueError("wrong format")
+    else:
+        return datetime.date(year, month, day)
+
+
 if __name__ == "__main__":
-    employee = from_dataclass(Employee, parsers=parsers)
+    parsers = {
+        datetime.date: parse_date_dmy,
+    }
 
-    print("\n--- Final result ---")
-    print(employee)
+    res = get_input(MusicStudent, parsers=parsers)
+    pprint(res)
 ```
 ## Interactive Session Example
 ```
-name (str): Alice
-birthdate (date): 1982-07-08
-active (bool, default=True): 0
+# Type '..' to undo previous input
+# Press 'enter' to skip fields marked with ?
 
-address.city (str): Beriln    
-address.postal_code (str): ..   > 💡 Undo previous input.
+[name <- music student]
+first : Jakob
+middle? <str, ...> : Ludwig, Felix
+last : Mandelssohn Bartholdy
 
-address.city (str): Berlin
-address.postal_code (str): 10084
-address.country (str, default=Germany):   > 💡 Accept default value.
+[music student]
+date of birth <date: DD/MM/YYYY> : ..
 
-New data:   > 💡 Edit values as needed. 
-[0] name (str): Alice
-[1] birthdate (date): 1982-07-08
-[2] active (bool): False
-[3] address.city (str): Berlin
-[4] address.postal_code (str): 10084
-[5] address.country (str): Germany
+[name <- music student]
+last : Mendelssohn Bartholdy
 
-Change value? (n / {index} {new_value}): 4 10085
+[music student]
+date of birth <date: DD/MM/YYYY> : 03/02/1809
 
-New data:
-[0] name (str): Alice
-[1] birthdate (date): 1982-07-08
-[2] active (bool): False
-[3] address.city (str): Berlin
-[4] address.postal_code (str): 10085
-[5] address.country (str): Germany
+[address <- music student]
+# Must be a German address
+street : Jägerstraße
+street number <int> : 51
+apartment? : 
+zip code <int: XXXXX> : 10117
+city : (default: Berlin) 
 
-Change value? (n / {index} {new_value}): n   > 💡 Session complete.
+[primary instrument <- music student]
+name : piano
+start date? <date: DD/MM/YY> : 01/01/1816
+comments? : 
+
+# Other instruments the student may have experience with
+> Add secondary instruments to music student? <y/n> : y
+
+[instrument <- music student]
+name : violin
+start date? <date: DD/MM/YY> : 
+comments? : 
+
+> Add another instrument to music student? <y/n> : y
+
+[instrument <- music student]
+name : ukelele
+start date? <date: DD/MM/YY> : 
+comments? : student proclaimed 'uke is life', look up what that means
+
+> Add another instrument to music student? <y/n> : n
+
+[music student]
+comments? : seems v. talented
+
+> Finish? <y/n> : y
 ```
 ## Final Result
-```python
-Employee(
-    name='Alice', 
-    birthdate=datetime.date(1982, 7, 8), 
-    address=Address(
-        city='Berlin', 
-        postal_code='10085', 
-        country='Germany'
-    ), 
-    active=False
-)
-```
+TODO
 ---
 ## Planned Features
-- Support for `attrs` and `pydantic`
-- Optional JSON/YAML import/export
-- Better colorized CLI output
+- Adapters for `attrs`, `pydantic` and `sqlalchemy` 
+- Customizable UX

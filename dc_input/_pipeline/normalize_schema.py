@@ -6,18 +6,17 @@ from typing import Any, get_type_hints, Literal, Annotated
 
 from dc_input._types import (
     NormalizedSchema,
-    ContainerRegistry,
-    NonSchemaRegistry,
+    ContainerAliasRegistry,
     KeyPath,
     SchemaShape,
     ContainerShape,
-    FieldShape,
     NormalizedField,
-    FixedSchemaTupleShape,
-    FixedTupleShape,
+    FixedSchemaContainerShape,
+    FixedContainerShape,
     LiteralShape,
     DictShape,
-    LeafShape,
+    AtomicShape,
+    SchemaContainerShape,
 )
 from dc_input._utils import (
     get_type_base_args,
@@ -29,17 +28,36 @@ from dc_input._utils import (
 
 def normalize_schema(
     sc: Any,
-    containers: ContainerRegistry,
-    non_schemas: NonSchemaRegistry,
+    container_aliases: ContainerAliasRegistry,
     _path: KeyPath = (),
     _res: NormalizedSchema | None = None,
 ) -> NormalizedSchema:
+    """
+    Convert a user-facing schema (dataclasses + typing annotations)
+    into a flat, explicit, and uniform representation for downstream processing.
+
+    Produce a mapping from a field path (a tuple of nested field names)
+    to a 'NormalizedField'. Each 'NormalizedField' contains a 'FieldShape'. This is a
+    structural description of how values are composed: leaf values, containers,
+    fixed tuples with schemas, fixed tuples without schemas, dictionaries, literals,
+    or nested schemas.
+
+    Assumptions about the schema are based on validation done before in
+    validate_user_definitions.py.
+    """
+    assert is_dataclass(sc)
+
     _res = _res or {}
 
     type_hints = get_type_hints(sc, include_extras=True)
-    flds = fields(sc)  # Assume sc is dataclass
+    flds = fields(sc)
     for name, t in type_hints.items():
         fld_cur = next(fld for fld in flds if fld.name == name)
+        if not fld_cur.init:
+            continue
+
+        path_cur = _path + (name,)
+
         default = fld_cur.default
         default_factory = fld_cur.default_factory
 
@@ -55,68 +73,73 @@ def normalize_schema(
         else:
             field_type = t_no_annotation
 
-        # shape_type: field_type or substituted type
+        # shape_type: field_type or alias type
         base_shape, args_shape = get_type_base_args(field_type)
-        if t_substitute := containers.get(base_shape):
-            base_shape, args_shape = get_type_base_args(t_substitute)
+        if alias := container_aliases.get(base_shape):
+            # Assume non-parameterized
+            base_shape = alias
 
-        shape = _get_shape(base_shape, args_shape, is_optional)
-        path_cur = _path + (name,)
+        shape = _get_shape(base_shape, args_shape)
 
         _res[path_cur] = NormalizedField(
+            path=path_cur,
             type=field_type,
+            is_optional=is_optional,
             default=default,
             default_factory=default_factory,
             annotation=annotation,
             shape=shape,
         )
 
-        if sc_nested := find_schema_in_type(field_type, non_schemas):
-            normalize_schema(sc_nested, containers, non_schemas, path_cur, _res)
+        type_to_check = base_shape[args_shape] if alias else field_type
+        if sc_nested := find_schema_in_type(type_to_check):
+            normalize_schema(sc_nested, container_aliases, path_cur, _res)
 
     return _res
 
 
-def _get_shape(
-    base: type, args: tuple[Any, ...], is_optional: bool | None = None
-) -> FieldShape:
+def _get_shape(base: type, args: tuple[Any, ...]) -> FieldShape:
     if is_dataclass(base):
-        return SchemaShape(is_optional, schema_type=base)
+        # SchemaShape
+        return SchemaShape(base)
     elif base is Literal:
-        return LiteralShape(is_optional, values=args)
+        # LiteralShape
+        return LiteralShape(args)
     elif alt_issubclass(base, dict):
-        # Assume no nested structures allowed as dict values
+        # DictShape
         args = args + tuple(Any for _ in range(2 - len(args)))
-        keys_t = LeafShape(is_optional=False, value_type=args[0])
-        vals_t = LeafShape(is_optional=False, value_type=args[1])
-        return DictShape(is_optional, keys_t, vals_t)
+        keys_t = AtomicShape(args[0])
+        vals_t = AtomicShape(args[1])
+        return DictShape(keys_t, vals_t)
     elif (
         alt_issubclass(base, (list, set))
         or Ellipsis in args
         or (alt_issubclass(base, tuple) and not args)
     ):
+        # ContainerShape / SchemaContainerShape
         args = args or (Any,)
-        # Assume max depth == 2
         base_inner, args_inner = get_type_base_args(args[0])
-        # Assume UnionType not allowed as base_inner
-        element = _get_shape(base_inner, args_inner, is_optional=False)
-        return ContainerShape(is_optional, container_type=base, element=element)
+        if is_dataclass(base_inner):
+            return SchemaContainerShape(base, base_inner)
+        else:
+            # Assume max depth == 2
+            element = _get_shape(base_inner, args_inner)
+            return ContainerShape(base, element)
     elif alt_issubclass(base, tuple):
+        # FixedContainerShape / FixedSchemaContainerShape
         args = args or (Any,)
         if is_dataclass(args[0]):
             # Assume homogeneous when schema in args
-            return FixedSchemaTupleShape(
-                is_optional, schema_type=args[0], length=len(args)
-            )
+            return FixedSchemaContainerShape(base, args[0], len(args))
         else:
             elements = []
             for arg in args:
                 # Assume max depth == 2
                 base_inner, args_inner = get_type_base_args(arg)
-                elements.append(_get_shape(base_inner, args_inner, is_optional=False))
-            return FixedTupleShape(is_optional, tuple(elements))
+                elements.append(_get_shape(base_inner, args_inner))
+            return FixedContainerShape(base, tuple(elements))
     else:
-        return LeafShape(is_optional, value_type=base)
+        return AtomicShape(base)
 
 
 def _extract_annotation(t: type) -> tuple[type | UnionType, str]:
@@ -197,7 +220,5 @@ if __name__ == "__main__":
         # Dict of scalars with defaults
         env: dict[str, str] = field(default_factory=dict)
 
-    for k, v in normalize_schema(Config, {}, []).items():
+    for k, v in normalize_schema(Config, {}).items():
         print(k, ":", v)
-
-# TODO: Test with container and non-schemas registry

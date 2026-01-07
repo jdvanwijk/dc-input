@@ -1,137 +1,84 @@
 from __future__ import annotations
 
-from types import NoneType, UnionType
-from typing import Annotated, Any, Literal, Union
+from typing import Any
 
-from dc_input._types import ParserFunc, ParserRegistry
+from dc_input._types import (
+    ParserFunc,
+    ParserRegistry,
+    FixedContainerShape,
+    DictShape,
+    ContainerShape,
+    AtomicShape,
+    LiteralShape,
+)
 
-from dc_input._utils import get_type_base_args, alt_issubclass, get_optional_non_none
+from dc_input._utils import alt_issubclass
 
 
 # ------------------------------------------------------------
 # Main parsing functions
 # ------------------------------------------------------------
-def parse_input(value: str, t: Any, registry: ParserRegistry):
+def parse_input(
+    value: str,
+    shape: ContainerShape | DictShape | FixedContainerShape | AtomicShape | LiteralShape,
+    registry: ParserRegistry,
+):
     """
     Entry point of the pipeline.
 
-    - Optional[T] => parse flat/nested based on T
-    - Containers (list, set, tuple, dict and subclasses) => nested parsing
-    - All other types => flat parsing
+    - ContainerShape, DictShape, FixedContainerShape => nested parsing
+    - LeafShape, LiteralShape => flat parsing
     """
-    base, args = get_type_base_args(t)
-
-    # ---------- Handle Union[T, None] ----------
-    if base is UnionType or base is Union:
-        # assume parse_schema rejects all other unions
-        elem_t = get_optional_non_none(t)
-        elem_t_base, _ = get_type_base_args(elem_t)
-
-        # Choose flat or nested based on inner T
-        if _is_container_type(elem_t_base):
-            structure = _parse_structure_nested(value)
-        else:
-            structure = _parse_structure_flat(value)
-
-        return _coerce(structure, t, registry)
-
-    # ---------- Handle all other types ----------
-    if _is_container_type(base):
+    if isinstance(shape, (ContainerShape, DictShape, FixedContainerShape)):
         structure = _parse_structure_nested(value)
     else:
         structure = _parse_structure_flat(value)
 
-    return _coerce(structure, t, registry)
+    return _coerce(structure, shape, registry)
 
 
-def _coerce(value: str | list, t: Any, registry: ParserRegistry):
-    assert isinstance(value, (str, list))
-
-    base, args = get_type_base_args(t)
-
-    # ---------- Annotated, Any, Literal ----------
-    if base is Annotated:
-        return _coerce(value, args[0], registry)
-
-    if base is Any:
-        return value
-
-    if base is Literal:
-        for arg in args:
-            if str(arg) == value:
-                return arg
-        raise ValueError(f"value must be in {args}")
-
-    # ---------- Union[T, None] ----------
-    if base is UnionType or base is Union:
-        # Assume parse_schema ensures this is Optional[T]
-        elem_t = args[0] if args[0] is not NoneType else args[1]
-        try:
-            # try None parser first - value might be provided as ["none"] when T is a container
-            possible_none = value[0] if isinstance(value, list) else value
-            parser = registry[NoneType]
-            return parser(possible_none)
-        except Exception:
-            # parse T if None parser fails
-            return _coerce(value, elem_t, registry)
-
-    # ---------- List, set (+ subclasses) ----------
-    if alt_issubclass(base, (list, set)):
-        if not isinstance(value, list):
-            raise ValueError(
-                "Input does not match type structure (missing parenthesis?)"
-            )
-
-        elem_t = args[0] if args else Any
-        coerced = [_coerce(v, elem_t, registry) for v in value]
-        return base(coerced)
-
-    # ---------- Tuple (+ subclasses) ----------
-    if alt_issubclass(base, tuple):
-        if not isinstance(value, list):
-            raise ValueError(
-                "Input does not match type structure (missing parenthesis?)"
-            )
-
-        if not args:
-            coerced = [_coerce(v, Any, registry) for v in value]
-            return base(coerced)
-        elif len(args) == 2 and args[1] is Ellipsis:  # tuple[T, ...]
-            elem_t = args[0]
-            coerced = [_coerce(v, elem_t, registry) for v in value]
-            return base(coerced)
-        else:
-            if len(value) != len(args):
-                raise ValueError(
-                    "number of values does not match number of tuple parameters"
-                )
-            coerced = [_coerce(v, elem_t, registry) for v, elem_t in zip(value, args)]
-            return base(coerced)
-
-    # ---------- Dict (+ subclasses) ----------
-    if alt_issubclass(base, dict):
-        if not isinstance(value, list):
-            raise ValueError("dict entries must be comma-separated (k,v) pairs")
-
-        key_t, val_t = args if args else (Any, Any)
-        result = base()
+def _coerce(
+    value: str | list,
+    shape: ContainerShape | DictShape | FixedContainerShape | AtomicShape | LiteralShape,
+    registry: ParserRegistry,
+):
+    if isinstance(shape, ContainerShape):
+        return shape.container_type(_coerce(v, shape.element, registry) for v in value)
+    elif isinstance(shape, DictShape):
+        res = {}
         for pair in value:
             if len(pair) != 2:
-                raise ValueError(
-                    f"dict entries must be comma-separated (k,v) pairs; got {pair!r}"
-                )
-
+                raise ValueError(f"comma-separated pairs required; got {pair!r}")
             k_raw, v_raw = pair
-            k = _coerce(k_raw, key_t, registry)
-            v = _coerce(v_raw, val_t, registry)
-            result[k] = v
+            k = _coerce(k_raw, shape.key, registry)
+            v = _coerce(v_raw, shape.value, registry)
+            res[k] = v
 
-        return result
+        return res
+    elif isinstance(shape, FixedContainerShape):
+        if len(value) != len(shape.elements):
+            raise ValueError(
+                f"invalid number of values (required: {len(shape.elements)}"
+            )
+        return shape.container_type(
+            _coerce(v, el, registry) for v, el in zip(value, shape.elements)
+        )
+    elif isinstance(shape, AtomicShape):
+        if isinstance(value, list):
+            if len(value) == 1 and isinstance(value[0], str):
+                raise ValueError(f"unnecessary parentheses around {value[0]!r}")
+            raise ValueError("unexpected grouping")
 
-    # ---------- All other types ----------
-    # Assume simple type
-    parser = _select_parser(base, registry)
-    return parser(value)
+        if shape.value_type is Any:
+            return value
+        else:
+            parser = _select_parser(shape.value_type, registry)
+            return parser(value)
+    elif isinstance(shape, LiteralShape):
+        for v in shape.values:
+            if str(v) == value:
+                return v
+        raise ValueError(f"value must be in {shape.values}")
 
 
 # ------------------------------------------------------------
@@ -216,21 +163,15 @@ def _parse_structure_nested(s: str) -> list[str | list]:
 
 def _select_parser(base: Any, registry: ParserRegistry) -> ParserFunc:
     """
-    Locate a parser for `base`:
-      1. registry.parsers exact lookup
-      2. MRO fallback if base is a class
-      3. Call base directly
+    Locate a parser for `base` in the provided registry. If no parser is found, call base directly.
     """
     if parser := registry.get(base):
         return parser
+    return lambda s: base(s)
 
-    if isinstance(base, type):
-        for cls in base.__mro__[1:]:
-            if parser := registry.get(cls):
-                return parser
 
-    if isinstance(base, type):
-        return lambda s: base(s)
-
-    # User did not provide valid parser for base
-    raise ValueError(f"No parser available for type {base!r}")
+# TODO: Fix error-message for invalid amount of parentheses in list[T]
+# middle? <str, ...> : (hollo, ja
+# > Invalid input: Missing closing ')'. -> Should already error for using parentheses at all
+# middle? <str, ...> : ((hollo)), ja
+# > Invalid input: 'list' object has no attribute 'strip'. -> Same here

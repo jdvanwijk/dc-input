@@ -7,13 +7,16 @@ from dc_input._types import ParserRegistry
 # Default parsers for builtin primitives
 # ------------------------------------------------------------
 def _parse_bool(s: str) -> bool:
-    sl = s.strip().lower()
-    if sl not in ("y", "n"):
-        raise ValueError("must be 'y' or 'n'")
-    return sl == "y"
+    s = s.strip().lower()
+    yes = ("y", "yes", "1", "t", "true")
+    no = ("n", "no", "0", "f", "false")
+    if s not in yes + no:
+        raise ValueError(f"must be in {yes} for 'True' or {no} for 'False'")
+    return s in yes
 
 
 def _parse_float(s: str) -> float:
+    s = s.strip().replace(",", ".")
     try:
         return float(s)
     except (TypeError, ValueError):
@@ -21,6 +24,7 @@ def _parse_float(s: str) -> float:
 
 
 def _parse_int(s: str) -> int:
+    s = s.strip()
     try:
         return int(s)
     except (TypeError, ValueError):
@@ -28,10 +32,10 @@ def _parse_int(s: str) -> int:
 
 
 def _parse_str(s: str) -> str:
-    return s
+    return s.strip()
 
 
-def _get_default_registry() -> ParserRegistry:
+def _get_primitive_parsers() -> ParserRegistry:
     return {
         bool: _parse_bool,
         float: _parse_float,
@@ -43,5 +47,9 @@ def _get_default_registry() -> ParserRegistry:
 # ------------------------------------------------------------
 # Main function
 # ------------------------------------------------------------
-def prepare_parsers(custom: ParserRegistry) -> ParserRegistry:
-    return _get_default_registry() | custom
+def merge_parsers(parsers_to_add: ParserRegistry) -> ParserRegistry:
+    """
+    Merge a registry of user provided parsers with the parsers provided by the library.
+    Library parsers have priority.
+    """
+    return parsers_to_add | _get_primitive_parsers()

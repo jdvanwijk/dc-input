@@ -9,7 +9,7 @@ from dc_input._pipeline.run_user_session._parse_input import (
     _is_container_type,
     _select_parser,
 )
-from dc_input._pipeline.prepare_parsers import _get_default_registry
+from dc_input._pipeline.merge_parsers import _get_primitive_parsers
 
 
 # TODO: REDO TESTS
@@ -18,7 +18,7 @@ from dc_input._pipeline.prepare_parsers import _get_default_registry
 @pytest.fixture
 def default_registry():
     """Return the default parser registry."""
-    return _get_default_registry()
+    return _get_primitive_parsers()
 
 
 def test_annotated(default_registry):

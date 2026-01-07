@@ -1,5 +1,4 @@
-from collections.abc import Iterable
-from dataclasses import is_dataclass, fields, dataclass
+from dataclasses import is_dataclass, fields
 from types import NoneType, UnionType
 from typing import (
     Annotated,
@@ -14,7 +13,7 @@ from typing import (
     Optional,
 )
 
-from dc_input._types import ContainerRegistry, NonSchemaRegistry, ParserRegistry
+from dc_input._types import ContainerAliasRegistry, ParserRegistry
 from dc_input._utils import (
     alt_issubclass,
     get_type_base_args,
@@ -25,8 +24,7 @@ from dc_input._utils import (
 
 def validate_user_definitions(
     schema: Any,
-    containers: ContainerRegistry,
-    non_schemas: NonSchemaRegistry,
+    container_aliases: ContainerAliasRegistry,
     parsers: ParserRegistry,
 ) -> None:
     """
@@ -37,13 +35,10 @@ def validate_user_definitions(
     """
     # Collect errors
     all_errors = {
-        "containers": _get_container_registry_errors(containers),
-        "non_schemas": _get_non_schema_registry_errors(non_schemas),
+        "container_aliases": _get_container_registry_errors(container_aliases),
         "parsers": _get_parser_registry_errors(parsers),
+        "schema": _get_schema_errors(schema),
     }
-
-    if not all_errors["non_schemas"]:
-        all_errors["schema"] = _get_schema_errors(schema, non_schemas)
 
     # Format errors
     fmt = lambda err: f"- {err}\n"
@@ -57,15 +52,15 @@ def validate_user_definitions(
         raise ValueError("".join(res))
 
 
-def _get_container_registry_errors(registry: ContainerRegistry) -> list[str]:
+def _get_container_registry_errors(registry: ContainerAliasRegistry) -> list[str]:
     """
     Validate a container registry mapping custom container types to
     concrete substitute container implementations.
 
     Enforced rules:
     - Registry must be a dict.
-    - Keys must be concrete, non-parameterized types.
-    - Values must be concrete subclasses of dict, list, set, or tuple.
+    - Keys and values must be concrete, non-parameterized types.
+    - Values must be concrete, non-parameterized dict, list, set, or tuple types.
 
     Returns a list of error messages describing all detected violations.
     """
@@ -90,44 +85,15 @@ def _get_container_registry_errors(registry: ContainerRegistry) -> list[str]:
         _, container_t_args = get_type_base_args(container_t)
         if container_t_args:
             errors.append(
-                f"Parameterized registry keys are not allowed, got '{container_t}'"
+                f"Parameterized registry keys are not allowed, got '{container_t.__name__}'"
             )
 
         substitue_t_base, _ = get_type_base_args(substitute_t)
-        if not alt_issubclass(substitue_t_base, (dict, list, set, tuple)):
+        if not substitue_t_base in (dict, list, set, tuple):
             errors.append(
-                f"Registry values must be subclasses of dict, list, set or tuple, got "
-                f"'{substitute_t}' at key '{container_t}'"
+                f"Registry values must be concrete type of dict, list, set or tuple, got "
+                f"'{substitute_t.__name__}' at key '{container_t.__name__}'"
             )
-
-    return errors
-
-
-def _get_non_schema_registry_errors(registry: NonSchemaRegistry) -> list[str]:
-    """
-    Validate the non-schema registry, which declares types that should
-    be treated as leaf values rather than nested schemas.
-
-    Enforced rules:
-    - Registry must be iterable.
-    - All entries must be concrete types.
-    - Parameterized types are not allowed.
-
-    Returns a list of error messages describing all detected violations.
-    """
-    errors: list[str] = []
-
-    if not isinstance(registry, Iterable):
-        errors.append("Registry must be iterable")
-        return errors
-
-    for t in registry:
-        if not isinstance(t, type):
-            errors.append(f"Registry values must be concrete types, got '{t}'")
-            continue
-        _, args = get_type_base_args(t)
-        if args:
-            errors.append(f"Parameterized registry values are not allowed, got '{t}'")
 
     return errors
 
@@ -140,9 +106,7 @@ def _get_parser_registry_errors(registry: ParserRegistry) -> list[str]:
     - Registry must be a dict.
     - Keys must be concrete, non-parameterized types.
     - Parsers must be callable.
-    - Parsers may not override container, union, or typing abstraction types
-      (e.g. list, dict, Union, Annotated, Literal, Any, NoneType).
-    - Parameterized types are not allowed as parser keys.
+    - Parsers may not override primitive, container, union, or typing abstraction types.
 
     Returns a list of error messages describing all detected violations.
     """
@@ -150,8 +114,11 @@ def _get_parser_registry_errors(registry: ParserRegistry) -> list[str]:
     invalid_types = {
         Annotated,
         Any,
+        bool,
         dict,
         Dict,
+        float,
+        int,
         list,
         List,
         Literal,
@@ -159,6 +126,7 @@ def _get_parser_registry_errors(registry: ParserRegistry) -> list[str]:
         NoneType,
         set,
         Set,
+        str,
         tuple,
         Tuple,
         Union,
@@ -187,26 +155,27 @@ def _get_parser_registry_errors(registry: ParserRegistry) -> list[str]:
         if base in invalid_types:
             errors.append(f"Not allowed to override parser for type '{base.__name__}'")
         if args:
-            errors.append(f"Parameterized types are not allowed (received: '{t}'")
+            errors.append(
+                f"Parameterized types are not allowed (received: '{t.__name__}'"
+            )
 
     return errors
 
 
-def _get_schema_errors(
-    sc: Any, non_schemas: NonSchemaRegistry, _errors: list[str] | None = None
-) -> list[str]:
+def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
     """
     Enforced rules:
     - Schema:
         * must be a dataclass
         * must have at least one field
         * field type can't be None
-        * fields may not have nested Annotations (list[Annotated[T]], etc.)
+        * nested Annotations not allowed (example: list[Annotated[T]])
     - Unions:
         * only T | None unions are allowed (other Unions are ambiguous when parsing)
-        * use of typing.Optional is not allowed (considered deprecated, adds parsing complexity)
+        * use of typing.Optional is not allowed (considered deprecated, and adds parsing complexity)
+        * Nested unions are not allowed (example: list[T | None])
     - List/Set/Tuple:
-        * may only nest one level (ie: list[list] is okay, list[list[list]] isn't)
+        * may only nest one level (example: list[list[T]]). exception: nesting is not allowed when T is a schema
         * may not contain nested dicts
     - Dicts:
         * may not contain nested schemas
@@ -239,26 +208,34 @@ def _get_schema_errors(
     for name, t in get_type_hints(sc).items():
         base, args = get_type_base_args(t)
 
+        # Recursively validate nested schemas
+        for arg in args:
+            if nested := find_schema_in_type(arg):
+                _get_schema_errors(nested, _errors)
+
+        # Reject None
         if t in (None, NoneType):
             _errors.append(
                 f"Field type can't be None [schema: {sc.__name__}, field: '{name}']"
             )
 
-        # Recursively validate nested schemas
-        for arg in args:
-            if nested := find_schema_in_type(arg, non_schemas):
-                _get_schema_errors(nested, _errors)
-
-        # Union
+        # UnionType
         if base is Optional:
             _errors.append(
-                f"Optional[T] is not allowed; use T | None instead [schema: {sc.__name__}, field: '{name}']"
+                f"Optional[T] is deprecated; use T | None instead [schema: {sc.__name__}, field: '{name}']"
             )
             continue
+
+        if _has_nested_union_type(t):
+            _errors.append(
+                f"Nested UnionTypes are not allowed. [schema: {sc.__name__}, field: '{name}']"
+            )
+            continue
+
         if base in (Union, UnionType):
             if NoneType not in args:
                 _errors.append(
-                    f"Ambiguous Union types {args}; only T | None is allowed. "
+                    f"Received ambiguous Union type ({t.__name__}); only T | None is allowed. "
                     f"[schema: {sc.__name__}, field: '{name}']"
                 )
                 continue
@@ -270,12 +247,13 @@ def _get_schema_errors(
                     f"[schema: {sc.__name__}, field: '{name}']"
                 )
 
-        # List, Set, Tuple[T, ...]
+        # list, set, tuple[T, ...]
         if alt_issubclass(t, (list, set, tuple)):
             depth = _max_container_depth(t)
             if depth > 2:
                 _errors.append(
                     f"Containers may only nest one level deep; got nesting depth {depth}. "
+                    f"(Hint: nested schema is also considered a nesting level) "
                     f"[schema: {sc.__name__}, field: '{name}']"
                 )
 
@@ -288,9 +266,9 @@ def _get_schema_errors(
                         f"[schema: {sc.__name__}, field: '{name}']"
                     )
 
-        # Dict
+        # dict
         if alt_issubclass(t, dict):
-            if any(find_schema_in_type(arg, non_schemas) for arg in args):
+            if any(find_schema_in_type(arg) for arg in args):
                 _errors.append(
                     f"Dicts can't contain nested schemas; got {args}. "
                     f"[schema: {sc.__name__}, field: '{name}']"
@@ -304,7 +282,7 @@ def _get_schema_errors(
                     )
 
         # Fixed-size tuples containing schemas
-        if alt_issubclass(t, tuple) and find_schema_in_type(t, non_schemas):
+        if alt_issubclass(t, tuple) and find_schema_in_type(t) and Ellipsis not in args:
             if not all(is_dataclass(arg) for arg in args):
                 _errors.append(
                     f"Tuple can't contain both schemas and other types; got {args}. "
@@ -348,4 +326,25 @@ def _max_container_depth(t: Any) -> int:
             return 1
         return 1 + max(_max_container_depth(arg) for arg in args)
 
+    # Add one to depth when nested schema
+    if is_dataclass(base):
+        return 1
+
     return 0
+
+
+def _has_nested_union_type(t: type | UnionType) -> bool:
+    def _has_nested(t: type | UnionType) -> bool:
+        base, args = get_type_base_args(t)
+        if base in (Union, UnionType, Optional):
+            return True
+        for arg in args:
+            return _has_nested(arg)
+        return False
+
+    _, args = get_type_base_args(t)
+    if args:
+        for arg in args:
+            return _has_nested(arg)
+
+    return False
