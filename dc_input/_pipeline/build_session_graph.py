@@ -151,9 +151,15 @@ def _add_skips(steps: list[SessionStep]) -> list[SessionStep]:
             res.append(step_cur)
             continue
 
-        remaining = steps[i + 1 :]
+        remaining = steps[i + 1:]
         shape = step_cur.field.shape
-        if isinstance(shape, SchemaContainerShape) or step_cur.field.is_optional:
+        if isinstance(shape, SchemaContainerShape):
+            for i_remaining, step in enumerate(remaining):
+                if isinstance(step, RepeatExit) and step.context is step_cur:
+                    skip_target = remaining[i_remaining + 1]
+                    step_cur.skip_target = skip_target
+                    break
+        elif step_cur.field.is_optional:
             skip_target = _find_next_non_child(remaining, step_cur)
             step_cur.skip_target = skip_target
 
@@ -166,6 +172,7 @@ def _link_graph(steps: list[SessionStep]) -> None:
     for prev, cur in zip(steps, steps[1:]):
         prev.next = cur
         cur.prev = prev
+
 
 
 def _find_next_non_child(

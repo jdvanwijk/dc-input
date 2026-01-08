@@ -86,7 +86,7 @@ def _handle_context_entry_step(
         annotation_fmt = ""
 
     cur_fmt = _normalize_name(step_cur.name)
-    parent_fmt = _get_name(step_cur.parent)
+    parent_fmt = _normalize_name(_get_schema_name(step_cur.parent))
     if info := step_cur.position_info:
         repeats_fmt = f" ({info.total_repeats})"
     else:
@@ -97,13 +97,11 @@ def _handle_context_entry_step(
     answer = _prompt_literal(prompt, accepted=["y", "n"], hidden=[".."])
     if answer == "y":
         print()
-        print(_format_header(step_cur))
+        print(_format_header(step_cur.next))
         return run_user_session(step_cur.next, parsers, res)
     elif answer == "n":
         return run_user_session(skip_target, parsers, res)
     else:
-        print()
-        print(_format_header(step_cur.parent))
         return _handle_undo(step_cur, parsers, res)
 
 
@@ -124,7 +122,7 @@ def _handle_input_step(
                 break
             to_check = to_check.parent
 
-    prompt = _format_input_step(step_cur)
+    prompt = _format_input_step_prompt(step_cur)
     v_input = input(prompt).strip()
     fld = step_cur.field
 
@@ -160,24 +158,26 @@ def _handle_input_step(
 
             res.append(UserInput(v_parsed, step_cur))
 
+    prev_res = res
     return run_user_session(step_cur.next, parsers, res)
 
 
 def _handle_repeat_exit(
     step_cur: RepeatExit, parsers: ParserRegistry, res: SessionResult
 ) -> SessionResult:
-    repeat_entry_fmt = _get_name(step_cur.context)
-    repeat_entry_parent_fmt = _get_name(step_cur.context.parent)
+    repeat_entry_fmt = _normalize_name(step_cur.context.name)
+    repeat_entry_parent_fmt = _normalize_name(_get_schema_name(step_cur.context.parent))
     prompt = _format_control_flow_prompt(
-        f"Add another {repeat_entry_fmt} to {repeat_entry_parent_fmt}?"
+        f"Add more {repeat_entry_fmt} to {repeat_entry_parent_fmt}?"
     )
 
     print()
     answer = _prompt_literal(prompt, accepted=["y", "n"], hidden=[".."])
     if answer == "y":
+        print()
+        print(_format_header(step_cur.element_start))
         return run_user_session(step_cur.element_start, parsers, res)
     elif answer == "n":
-        print(step_cur.next)
         return run_user_session(step_cur.next, parsers, res)
     else:
         return _handle_undo(step_cur, parsers, res)
@@ -203,6 +203,10 @@ def _handle_undo(
 
     input_to_undo = res.pop()
     step_undo = input_to_undo.input_step
+
+    if step_cur.field.path[:-1] != step_undo.field.path[:-1]:
+        print()
+        print(_format_header(step_undo.parent))
 
     return run_user_session(step_undo, parsers, res)
 
@@ -232,35 +236,41 @@ def _format_input_error(e: Exception | str) -> str:
     return f"{RED}> Invalid input: {msg}.{RESET}"
 
 
-def _format_header(step: SessionStart | ContextEntry, continued: bool = False) -> str:
-    assert isinstance(step, (SessionStart, ContextEntry))
+def _format_header(
+    step: SessionStart | InputStep | ContextEntry, continued: bool = False
+) -> str:
 
     continued_fmt = " (contd.)" if continued else ""
 
     if isinstance(step, SessionStart):
         return f"[{BOLD}{_normalize_name(step.name)}{RESET}{continued_fmt}]"
+
+    if isinstance(step.parent, ContextEntry) and isinstance(
+        step.parent.field.shape, SchemaContainerShape
+    ):
+        location_cur = _normalize_name(_get_schema_name(step.parent))
+        location_prev = _normalize_name(step.parent.name)
     else:
-        location_cur = _get_name(step)
-        location_prev = _get_name(step.parent)
-        location_cur_fmt = (
-            f"{BOLD}{location_cur}{RESET}{GREY} <- {location_prev}{RESET}"
+        location_cur = _normalize_name(step.name)
+        location_prev = _normalize_name(step.parent.name)
+    location_cur_fmt = (
+        f"{BOLD}{location_cur}{continued_fmt}{RESET}{GREY} <- {location_prev}{RESET}"
+    )
+
+    repeat_n_fmt = ""
+    if isinstance(step, ContextEntry) and step.position_info:
+        repeat_n_fmt = (
+            f" {step.position_info.n_repeat} of {step.position_info.total_repeats}"
         )
 
-        repeat_n_fmt = ""
-        if isinstance(step, ContextEntry) and step.position_info:
-            repeat_n_fmt = (
-                f" {step.position_info.n_repeat} of {step.position_info.total_repeats}"
-            )
-
-
-        return f"[{location_cur_fmt}{repeat_n_fmt}{continued_fmt}]"
+    return f"[{location_cur_fmt}{repeat_n_fmt}]"
 
 
 def _format_node_annotation(annotation: str) -> str:
     return f"{GREY}# {annotation}{RESET}"
 
 
-def _format_input_step(step: InputStep) -> str:
+def _format_input_step_prompt(step: InputStep) -> str:
     fld = step.field
 
     name_fmt = _normalize_name(step.name)
@@ -281,11 +291,7 @@ def _format_input_step(step: InputStep) -> str:
     else:
         v_def = fld.default
 
-    v_def_fmt = (
-        ""
-        if v_def in (MISSING, None)
-        else f"{GREY}(default: {v_def}){RESET} "
-    )
+    v_def_fmt = "" if v_def in (MISSING, None) else f"{GREY}(default: {v_def}){RESET} "
 
     return f"{name_fmt}{input_hint_fmt} : {v_def_fmt}"
 
@@ -362,20 +368,7 @@ def _can_skip(fld: NormalizedField) -> bool:
     )
 
 
-def _get_name(step: SessionStart | InputStep | ContextEntry) -> str:
-    """
-    Return the field name by default.
-
-    If the current context crosses a container-entry boundary
-    (skip_target), return the schema type name instead.
-    """
-    to_check = step if isinstance(step, (SessionStart, ContextEntry)) else step.parent
-
-    while True:
-        # Default case
-        if isinstance(to_check, SessionStart):
-            return _normalize_name(step.name)
-        # Crosses container-entry boundary
-        elif to_check.skip_target:
-            return _normalize_name(step.field.shape.schema_type.__name__)
-        to_check = to_check.parent
+def _get_schema_name(step: SessionStart | ContextEntry) -> str:
+    if isinstance(step, SessionStart):
+        return step.name
+    return step.field.shape.schema_type.__name__

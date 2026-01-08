@@ -12,6 +12,8 @@ from dc_input._get_input import get_input
 
 @dataclass
 class MusicStudent:
+    id: int
+
     name: Name
     date_of_birth: Annotated[datetime.date, "DD/MM/YYYY"]
     address: Annotated[Address, "Must be a German address"]
@@ -46,18 +48,12 @@ class Address:
     city: str = "Berlin"
 
 
-@dataclass
+@dataclass(frozen=True)
 class Instrument:
     name: str
     start_date: Annotated[datetime.date | None, "DD/MM/YYYY"]
-    comment: list[Comment]
+    comment: str | None
 
-
-
-@dataclass(kw_only=True)
-class Comment:
-    is_good: bool = True
-    tell_me: str
 
 def parse_date_dmy(s: str) -> datetime.date:
     match = re.match(

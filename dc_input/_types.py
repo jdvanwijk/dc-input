@@ -60,7 +60,7 @@ class ContextEntry(SessionStep):
     position_info: PositionInfo | None = None
 
     parent: SessionStart | ContextEntry | None = None
-    skip_target: ContextEntry | InputStep | SessionEnd | None = None
+    skip_target: ContextEntry | InputStep | SessionEnd | RepeatExit | None = None
     prev: SessionStart | ContextEntry | InputStep | RepeatExit | None = None
     next: ContextEntry | InputStep | None = None
 
@@ -113,7 +113,7 @@ class InputStep(SessionStep):
 @dataclass
 class RepeatExit(SessionStep):
     context: ContextEntry
-    element_start: SessionStep
+    element_start: ContextEntry | InputStep
     prev: SessionStep | None = None
     next: SessionStep | None = None
     name: str = field(init=False)
@@ -132,10 +132,12 @@ class SessionEnd(SessionStep):
     """
 
     prev: InputStep | None = None
+    next: None = field(init=False)
     name: str = field(init=False)
 
     def __post_init__(self) -> None:
         self.name = "SessionEnd"
+        self.next = None
 
     def __repr__(self) -> str:
         return _format_repr(self)

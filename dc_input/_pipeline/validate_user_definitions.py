@@ -348,3 +348,5 @@ def _has_nested_union_type(t: type | UnionType) -> bool:
             return _has_nested(arg)
 
     return False
+
+# TODO: Check if schemacontainers that expect hashable type (mainly set), gets a FROZEN dataclass instance
