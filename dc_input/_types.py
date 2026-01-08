@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC
 from collections.abc import Callable
-from dataclasses import dataclass, field, fields, _MISSING_TYPE
+from dataclasses import dataclass, field, fields, _MISSING_TYPE, MISSING, is_dataclass
 from typing import Any, Generic, Literal, TypeVar
 
 
@@ -34,20 +34,35 @@ class SessionStep(ABC):
 
 
 @dataclass
-class ContextStep(SessionStep):
+class SessionStart(SessionStep):
+    """
+    Entry point of an interactive input session.
+    """
+
+    name: str
+    next: ContextEntry | InputStep | None = None
+    parent: None = None
+
+    def __repr__(self) -> str:
+        return _format_repr(self)
+
+
+@dataclass
+class ContextEntry(SessionStep):
     """
     Session step representing entry into a nested schema or schema-container context.
 
-    ContextSteps do not collect values themselves; they group and control
-    traversal of child InputSteps and ContextSteps.
+    ContextEntries do not collect values themselves; they group and control
+    traversal of child InputSteps, ContextEntries and ContextExits.
     """
 
     field: NormalizedField[ExpandableShape]
     position_info: PositionInfo | None = None
-    parent: SessionStart | ContextStep | None = None
-    prev: SessionStart | ContextStep | InputStep | None = None
-    next: ContextStep | InputStep | None = None
-    skip_target: ContextStep | SessionEnd | None = None
+
+    parent: SessionStart | ContextEntry | None = None
+    skip_target: ContextEntry | InputStep | SessionEnd | None = None
+    prev: SessionStart | ContextEntry | InputStep | RepeatExit | None = None
+    next: ContextEntry | InputStep | None = None
 
     @property
     def name(self) -> str:
@@ -57,7 +72,7 @@ class ContextStep(SessionStep):
         assert isinstance(self.field.shape, ExpandableShape)
 
     def __repr__(self) -> str:
-        return _format_step_repr(self)
+        return _format_repr(self)
 
 
 @dataclass(frozen=True)
@@ -80,10 +95,9 @@ class InputStep(SessionStep):
     """
 
     field: NormalizedField[TerminalShape]
-    parent: SessionStart | ContextStep | None = None
-    prev: SessionStart | ContextStep | InputStep | None = None
-    next: ContextStep | InputStep | SessionEnd | None = None
-    repeat_entry: ContextStep | InputStep | None = None
+    parent: SessionStart | ContextEntry | None = None
+    prev: SessionStart | ContextEntry | InputStep | None = None
+    next: ContextEntry | InputStep | SessionEnd | None = None
 
     def __post_init__(self) -> None:
         assert isinstance(self.field.shape, TerminalShape)
@@ -93,21 +107,22 @@ class InputStep(SessionStep):
         return self.field.path[-1]
 
     def __repr__(self) -> str:
-        return _format_step_repr(self)
+        return _format_repr(self)
 
 
 @dataclass
-class SessionStart(SessionStep):
-    """
-    Entry point of an interactive input session.
-    """
+class RepeatExit(SessionStep):
+    context: ContextEntry
+    element_start: SessionStep
+    prev: SessionStep | None = None
+    next: SessionStep | None = None
+    name: str = field(init=False)
 
-    name: str
-    next: ContextStep | InputStep | None = None
-    parent: None = None
+    def __post_init__(self) -> None:
+        self.name = f"RepeatExit for '{self.context.name}'"
 
     def __repr__(self) -> str:
-        return _format_step_repr(self)
+        return _format_repr(self)
 
 
 @dataclass
@@ -123,19 +138,24 @@ class SessionEnd(SessionStep):
         self.name = "SessionEnd"
 
     def __repr__(self) -> str:
-        return _format_step_repr(self)
+        return _format_repr(self)
 
 
-def _format_step_repr(part: SessionStep) -> str:
+def _format_repr(obj: Any) -> str:
+    assert is_dataclass(obj)
+
     attrs_fmt = []
-    for f in fields(part):
-        v = getattr(part, f.name)
+    for f in fields(obj):
+        v = getattr(obj, f.name)
+        if v is MISSING:
+            v = "MISSING"
+
         if isinstance(v, SessionStep):
             attrs_fmt.append(f"{f.name}={v.__class__.__name__}(name={v.name}, ...)")
         else:
             attrs_fmt.append(f"{f.name}={v}")
 
-    return f"{part.__class__.__name__}({', '.join(attr for attr in attrs_fmt)})"
+    return f"{obj.__class__.__name__}({', '.join(attr for attr in attrs_fmt)})"
 
 
 # ---------- NormalizedField ----------
@@ -186,6 +206,9 @@ class NormalizedField(Generic[T]):
     annotation: str | None
 
     shape: T
+
+    def __repr__(self) -> str:
+        return _format_repr(self)
 
 
 # ---------- ExpandableShape, TerminalShape ----------
@@ -316,3 +339,4 @@ KeyPath = tuple[str, ...]  # Path to a specific schema field
 NormalizedSchema = dict[KeyPath, NormalizedField]
 ParserFunc = Callable[[str], Any]  # Used to parse a user input value
 ParserRegistry = dict[type, ParserFunc]  # Stores value parsers
+SessionResult = list[UserInput]

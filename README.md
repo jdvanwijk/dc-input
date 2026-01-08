@@ -52,7 +52,7 @@ class Name:
 class Address:
     street: str
     street_number: int
-    apartment: str | None
+    astepment: str | None
     zip_code: Annotated[int, "XXXXX"]
     city: str = "Berlin"
 
@@ -109,7 +109,7 @@ date of birth <date: DD/MM/YYYY> : 03/02/1809
 # Must be a German address
 street : Jägerstraße
 street number <int> : 51
-apartment? : 
+astepment? : 
 zip code <int: XXXXX> : 10117
 city : (default: Berlin) 
 

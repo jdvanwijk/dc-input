@@ -16,7 +16,7 @@ from dc_input._types import (
     LiteralShape,
     DictShape,
     AtomicShape,
-    SchemaContainerShape,
+    SchemaContainerShape, ExpandableShape, TerminalShape,
 )
 from dc_input._utils import (
     get_type_base_args,
@@ -98,7 +98,7 @@ def normalize_schema(
     return _res
 
 
-def _get_shape(base: type, args: tuple[Any, ...]) -> FieldShape:
+def _get_shape(base: type, args: tuple[Any, ...]) -> ExpandableShape | TerminalShape:
     if is_dataclass(base):
         # SchemaShape
         return SchemaShape(base)

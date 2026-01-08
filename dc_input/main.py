@@ -5,6 +5,7 @@ import datetime
 from pprint import pprint
 import re
 from typing import Annotated
+import logging
 
 from dc_input._get_input import get_input
 
@@ -45,12 +46,18 @@ class Address:
     city: str = "Berlin"
 
 
-@dataclass(kw_only=True)
+@dataclass
 class Instrument:
     name: str
-    start_date: Annotated[datetime.date | None, "DD/MM/YY"]
-    comment: str | None
+    start_date: Annotated[datetime.date | None, "DD/MM/YYYY"]
+    comment: list[Comment]
 
+
+
+@dataclass(kw_only=True)
+class Comment:
+    is_good: bool = True
+    tell_me: str
 
 def parse_date_dmy(s: str) -> datetime.date:
     match = re.match(
@@ -71,5 +78,9 @@ if __name__ == "__main__":
         datetime.date: parse_date_dmy,
     }
 
+    logging.basicConfig(level="DEBUG")
+    logger = logging.getLogger("dc_input")
+
     res = get_input(MusicStudent, parsers=parsers)
+
     pprint(res)

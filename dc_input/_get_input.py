@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TypeVar
 
-from _pipeline import (
+from dc_input._pipeline import (
     build_session_graph,
     initialize_schema,
     normalize_schema,

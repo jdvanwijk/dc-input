@@ -6,14 +6,14 @@ logger = logging.getLogger("dc_input")
 
 
 def log_normalized_schema(sc: NormalizedSchema) -> None:
-    logger.debug("===== DEBUG NORMALIZED SCHEMA =====")
+    logger.debug("===== NORMALIZED SCHEMA =====")
 
     for path, fld in sc.items():
         logger.debug("%s : %s", path, fld)
 
 
 def log_session_graph(start: SessionStart) -> None:
-    logger.debug("===== DEBUG QUERY GRAPH =====")
+    logger.debug("===== SESSION GRAPH =====")
 
     cur = start
     while True:

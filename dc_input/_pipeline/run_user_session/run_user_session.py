@@ -8,7 +8,7 @@ from dc_input._types import (
     UserInput,
     SessionStep,
     SessionEnd,
-    ContextStep,
+    ContextEntry,
     InputStep,
     ContainerShape,
     DictShape,
@@ -17,6 +17,9 @@ from dc_input._types import (
     FixedContainerShape,
     NormalizedField,
     TerminalShape,
+    SchemaContainerShape,
+    SessionResult,
+    RepeatExit,
 )
 from dc_input._utils import get_type_base_args
 
@@ -30,129 +33,178 @@ BOLD = "\033[1m"
 RESET = "\033[0m"
 
 
+# ------------------------------------------------------------
+# Main control flow functions
+# ------------------------------------------------------------
 def run_user_session(
     step_cur: SessionStep,
     parsers: ParserRegistry,
-    _res: list[UserInput] | None = None,
-) -> list[UserInput]:
+    _res: SessionResult | None = None,
+) -> SessionResult:
     if _res is None:
         _res = []
 
-    if isinstance(step_cur, SessionStart):
-        print(f"{GREY}# Type '..' to undo previous input{RESET}")
-        print(f"{GREY}# Press 'enter' to skip fields marked with {BLUE}?{RESET}")
+    handlers = {
+        SessionStart: _handle_session_start,
+        ContextEntry: _handle_context_entry_step,
+        InputStep: _handle_input_step,
+        RepeatExit: _handle_repeat_exit,
+        SessionEnd: _handle_session_end,
+    }
+
+    assert isinstance(
+        step_cur, (SessionStart, SessionEnd, ContextEntry, RepeatExit, InputStep)
+    )
+    handler = handlers[type(step_cur)]
+
+    return handler(step_cur, parsers, _res)
+
+
+def _handle_session_start(
+    step_cur: SessionStart, parsers: ParserRegistry, res: SessionResult
+) -> SessionResult:
+    print(f"{GREY}# Type '..' to undo previous input{RESET}")
+    print(f"{GREY}# Press 'enter' to skip fields marked with {BLUE}?{RESET}")
+    print(f"\n{_format_header(step_cur)}")
+    return run_user_session(step_cur.next, parsers, res)
+
+
+def _handle_context_entry_step(
+    step_cur: ContextEntry, parsers: ParserRegistry, res: SessionResult
+) -> SessionResult:
+    skip_target = step_cur.skip_target
+    if not skip_target:
         print(f"\n{_format_header(step_cur)}")
-        return run_user_session(step_cur.next, parsers, _res)
-    elif isinstance(step_cur, SessionEnd):
+        if step_cur.field.annotation:
+            print(_format_node_annotation(step_cur.field.annotation))
+        return run_user_session(step_cur.next, parsers, res)
+
+    # Handle optional schema
+    if annotation := step_cur.field.annotation:
+        annotation_fmt = f"\n{_format_node_annotation(annotation)}"
+    else:
+        annotation_fmt = ""
+
+    cur_fmt = _normalize_name(step_cur.name)
+    parent_fmt = _get_name(step_cur.parent)
+    if info := step_cur.position_info:
+        repeats_fmt = f" ({info.total_repeats})"
+    else:
+        repeats_fmt = ""
+    prompt = _format_control_flow_prompt(f"Add {cur_fmt}{repeats_fmt} to {parent_fmt}?")
+
+    print(annotation_fmt)
+    answer = _prompt_literal(prompt, accepted=["y", "n"], hidden=[".."])
+    if answer == "y":
         print()
-        prompt = _format_control_flow_prompt("Finish?")
-        answer = _prompt_literal(prompt, accepted=["y", "n"], hidden=[".."])
-        if answer == "y":
-            return _res
-        return _handle_undo(step_cur, parsers, _res)
-    elif isinstance(step_cur, ContextStep):
-        if skip_target := step_cur.skip_target:
-            if annotation := step_cur.field.annotation:
-                annotation_fmt = f"\n{_format_node_annotation(annotation)}"
-            else:
-                annotation_fmt = ""
+        print(_format_header(step_cur))
+        return run_user_session(step_cur.next, parsers, res)
+    elif answer == "n":
+        return run_user_session(skip_target, parsers, res)
+    else:
+        print()
+        print(_format_header(step_cur.parent))
+        return _handle_undo(step_cur, parsers, res)
 
-            cur_fmt = _normalize_name(
-                step_cur.name
-            )  # Field name may be more specific than the class name
-            parent_fmt = _get_contextual_name(step_cur.parent)
-            if info := step_cur.position_info:
-                repeats_fmt = f" ({info.total_repeats})"
-            else:
-                repeats_fmt = ""
-            prompt = _format_control_flow_prompt(
-                f"Add {cur_fmt}{repeats_fmt} to {parent_fmt}?"
-            )
 
-            print(annotation_fmt)
-            answer = _prompt_literal(prompt, accepted=["y", "n"], hidden=[".."])
-            if answer == "n":
-                return run_user_session(skip_target, parsers, _res)
-            elif answer == "..":
-                return _handle_undo(step_cur, parsers, _res)
+def _handle_input_step(
+    step_cur: InputStep, parsers: ParserRegistry, res: SessionResult
+) -> SessionResult:
+    # Re-print context header if we re-entered a parent context
+    if res:
+        input_prev_context = res[-1].input_step.parent
+        cur_context = step_cur.parent
+        to_check = input_prev_context.parent
+        while True:
+            if cur_context == to_check:
+                print()
+                print(_format_header(step_cur.parent, continued=True))
+                break
+            elif to_check is None:
+                break
+            to_check = to_check.parent
 
-        return run_user_session(step_cur.next, parsers, _res)
-    elif isinstance(step_cur, InputStep):
-        if _res:
-            prev_parent = _res[-1].input_step.parent
-            if step_cur.parent != prev_parent:
-                header = _format_header(step_cur.parent)
-                print(f"\n{header}")
-        elif not _res and not isinstance(
-            step_cur.prev, SessionStart
-        ):  # GraphStart prints its own header
-            header = _format_header(step_cur.parent)
-            print(f"\n{header}")
+    prompt = _format_input_step(step_cur)
+    v_input = input(prompt).strip()
+    fld = step_cur.field
 
-        # Only print annotation of parent when it hasn't been printed before
-        if (
-            isinstance(step_cur.prev, ContextStep)
-            and step_cur.prev.field.annotation
-            and not step_cur.prev.skip_target
-        ):
-            print(_format_node_annotation(step_cur.prev.field.annotation))
-
-        prompt = _format_input_step(step_cur)
-        v_input = input(prompt).strip()
-        fld = step_cur.field
-
-        # Special cases
-        if v_input == "..":
-            # Undo previous input
-            return _handle_undo(step_cur, parsers, _res)
-        elif v_input == "":
-            # Skip optional or select default value
-            if any(v is not MISSING for v in (fld.default, fld.default_factory)):
-                v = fld.default if fld.default is not MISSING else fld.default_factory()
-                _res.append(UserInput(v, step_cur))
-            elif _can_skip(fld):
-                _res.append(UserInput(None, step_cur))
-            else:
-                print(_format_input_error("must provide input"))
-                return run_user_session(step_cur, parsers, _res)
+    # Special cases
+    if v_input == "..":
+        # Undo previous input
+        return _handle_undo(step_cur, parsers, res)
+    elif v_input == "":
+        # Skip optional or select default value
+        if any(v is not MISSING for v in (fld.default, fld.default_factory)):
+            v = fld.default if fld.default is not MISSING else fld.default_factory()
+            res.append(UserInput(v, step_cur))
+        elif _can_skip(fld):
+            res.append(UserInput(None, step_cur))
         else:
-            # Normal case
-            try:
-                v_parsed = parse_input(v_input, fld.shape, parsers)
-            except AssertionError:
-                raise
-            except Exception as e:
-                print(_format_input_error(e))
-                return run_user_session(step_cur, parsers, _res)
-            else:
-                # Handle container-alias
-                # TODO: Should I put base of fld.type on the NormalizedField obj?
-                if isinstance(
-                    fld.shape, (ContainerShape, DictShape, FixedContainerShape)
-                ):
-                    base_type, _ = get_type_base_args(fld.type)
-                    v_parsed = base_type(v_parsed)
+            print(_format_input_error("must provide input"))
+            return run_user_session(step_cur, parsers, res)
+    else:
+        # Normal case
+        try:
+            v_parsed = parse_input(v_input, fld.shape, parsers)
+        except AssertionError:
+            raise
+        except Exception as e:
+            print(_format_input_error(e))
+            return run_user_session(step_cur, parsers, res)
+        else:
+            # Handle container-alias
+            # TODO: Should I put base of fld.type on the NormalizedField obj?
+            if isinstance(fld.shape, (ContainerShape, DictShape, FixedContainerShape)):
+                base_type, _ = get_type_base_args(fld.type)
+                v_parsed = base_type(v_parsed)
 
-                _res.append(UserInput(v_parsed, step_cur))
+            res.append(UserInput(v_parsed, step_cur))
 
-        # TODO: Search for other repeat entries in the tree - will probably need to flag that user does NOT want to repeat certain nodes? Or is the tree structure sufficient
-        if repeat_entry := step_cur.repeat_entry:
-            parent_fmt = _get_contextual_name(repeat_entry.parent)
-            grandparent_fmt = _get_contextual_name(repeat_entry.parent.parent)
-            prompt = _format_control_flow_prompt(
-                f"Add another {parent_fmt} to {grandparent_fmt}?"
-            )
+    return run_user_session(step_cur.next, parsers, res)
 
-            print()
-            answer = _prompt_literal(prompt, accepted=["y", "n"], hidden=[".."])
-            if answer == "y":
-                header = _format_header(repeat_entry.parent)
-                print(f"\n{header}")
-                return run_user_session(repeat_entry, parsers, _res)
-            elif answer == "..":
-                return _handle_undo(step_cur, parsers, _res)
 
-        return run_user_session(step_cur.next, parsers, _res)
+def _handle_repeat_exit(
+    step_cur: RepeatExit, parsers: ParserRegistry, res: SessionResult
+) -> SessionResult:
+    repeat_entry_fmt = _get_name(step_cur.context)
+    repeat_entry_parent_fmt = _get_name(step_cur.context.parent)
+    prompt = _format_control_flow_prompt(
+        f"Add another {repeat_entry_fmt} to {repeat_entry_parent_fmt}?"
+    )
+
+    print()
+    answer = _prompt_literal(prompt, accepted=["y", "n"], hidden=[".."])
+    if answer == "y":
+        return run_user_session(step_cur.element_start, parsers, res)
+    elif answer == "n":
+        print(step_cur.next)
+        return run_user_session(step_cur.next, parsers, res)
+    else:
+        return _handle_undo(step_cur, parsers, res)
+
+
+def _handle_session_end(
+    step_cur: SessionEnd, parsers: ParserRegistry, res: SessionResult
+) -> SessionResult:
+    print()
+    prompt = _format_control_flow_prompt("Finish?")
+    answer = _prompt_literal(prompt, accepted=["y", "n"], hidden=[".."])
+    if answer == "y":
+        return res
+    return _handle_undo(step_cur, parsers, res)
+
+
+def _handle_undo(
+    step_cur: SessionStep, parsers: ParserRegistry, res: SessionResult
+) -> SessionResult:
+    if not res:
+        print(_format_input_error("no previous input to undo"))
+        return run_user_session(step_cur, parsers, res)
+
+    input_to_undo = res.pop()
+    step_undo = input_to_undo.input_step
+
+    return run_user_session(step_undo, parsers, res)
 
 
 def _prompt_literal(
@@ -169,24 +221,9 @@ def _prompt_literal(
         print(_format_input_error(f"value must be {accepted_fmt}"))
 
 
-def _handle_undo(
-    step_cur: SessionStep, parsers: ParserRegistry, res: list[UserInput]
-) -> list[UserInput]:
-    if not res:
-        print(_format_input_error("no previous input to undo"))
-        return run_user_session(step_cur, parsers, res)
-
-    input_to_undo = res.pop()
-    part_undo = input_to_undo.input_step
-    if (
-        isinstance(step_cur, (InputStep, ContextStep))
-        and part_undo.parent != step_cur.parent
-    ):
-        print(f"\n{_format_header(part_undo.parent)}")
-
-    return run_user_session(part_undo, parsers, res)
-
-
+# ------------------------------------------------------------
+# Formatting helpers
+# ------------------------------------------------------------
 def _format_input_error(e: Exception | str) -> str:
     msg = str(e).strip()
     if msg.endswith("."):
@@ -195,35 +232,38 @@ def _format_input_error(e: Exception | str) -> str:
     return f"{RED}> Invalid input: {msg}.{RESET}"
 
 
-def _format_header(step: SessionStart | ContextStep) -> str:
-    assert isinstance(step, (SessionStart, ContextStep))
+def _format_header(step: SessionStart | ContextEntry, continued: bool = False) -> str:
+    assert isinstance(step, (SessionStart, ContextEntry))
+
+    continued_fmt = " (contd.)" if continued else ""
 
     if isinstance(step, SessionStart):
-        return f"[{BOLD}{_normalize_name(step.name)}{RESET}]"
-    elif isinstance(step, ContextStep):
-        location_cur = _get_contextual_name(step)
-        location_prev = _get_contextual_name(step.parent)
+        return f"[{BOLD}{_normalize_name(step.name)}{RESET}{continued_fmt}]"
+    else:
+        location_cur = _get_name(step)
+        location_prev = _get_name(step.parent)
         location_cur_fmt = (
             f"{BOLD}{location_cur}{RESET}{GREY} <- {location_prev}{RESET}"
         )
 
         repeat_n_fmt = ""
-        if isinstance(step, ContextStep) and step.position_info:
+        if isinstance(step, ContextEntry) and step.position_info:
             repeat_n_fmt = (
                 f" {step.position_info.n_repeat} of {step.position_info.total_repeats}"
             )
 
-        return f"[{location_cur_fmt}{repeat_n_fmt}]"
+
+        return f"[{location_cur_fmt}{repeat_n_fmt}{continued_fmt}]"
 
 
 def _format_node_annotation(annotation: str) -> str:
     return f"{GREY}# {annotation}{RESET}"
 
 
-def _format_input_step(part: InputStep) -> str:
-    fld = part.field
+def _format_input_step(step: InputStep) -> str:
+    fld = step.field
 
-    name_fmt = _normalize_name(part.name)
+    name_fmt = _normalize_name(step.name)
     if _can_skip(fld):
         name_fmt += f"{BLUE}?{RESET}"
 
@@ -234,10 +274,17 @@ def _format_input_step(part: InputStep) -> str:
         input_hint.append(annotation)
     input_hint_fmt = f" <{': '.join(input_hint)}>" if input_hint else ""
 
+    if fld.default is True:
+        v_def = "y"
+    elif fld.default is False:
+        v_def = "n"
+    else:
+        v_def = fld.default
+
     v_def_fmt = (
         ""
-        if fld.default in (MISSING, None)
-        else f"{GREY}(default: {fld.default}){RESET} "
+        if v_def in (MISSING, None)
+        else f"{GREY}(default: {v_def}){RESET} "
     )
 
     return f"{name_fmt}{input_hint_fmt} : {v_def_fmt}"
@@ -248,7 +295,19 @@ def _format_control_flow_prompt(prompt: str) -> str:
 
 
 def _format_input_type_hint(shape: TerminalShape) -> str:
-    if isinstance(shape, ContainerShape):
+    assert isinstance(
+        shape,
+        (AtomicShape, ContainerShape, DictShape, FixedContainerShape, LiteralShape),
+    )
+
+    if isinstance(shape, AtomicShape):
+        if shape.value_type in (Any, str):
+            return ""
+        elif shape.value_type is bool:
+            return "y/n"
+        else:
+            return shape.value_type.__name__
+    elif isinstance(shape, ContainerShape):
         if isinstance(shape.element, (ContainerShape, FixedContainerShape)):
             return f"({_format_input_type_hint(shape.element)}), ..."
         elif shape.element.value_type in (Any, str):
@@ -270,14 +329,8 @@ def _format_input_type_hint(shape: TerminalShape) -> str:
             else:
                 shape_fmt.append(_format_input_type_hint(el))
         return ", ".join(shape_fmt)
-    elif isinstance(shape, AtomicShape):
-        if shape.value_type in (Any, str):
-            return ""
-        elif shape.value_type is bool:
-            return "y/n"
-        else:
-            return shape.value_type.__name__
-    elif isinstance(shape, LiteralShape):
+    else:
+        # LiteralShape
         return "/".join(str(v) for v in shape.values)
 
 
@@ -297,6 +350,9 @@ def _normalize_name(name: str) -> str:
     return "".join(res)
 
 
+# ------------------------------------------------------------
+# Other helpers
+# ------------------------------------------------------------
 def _can_skip(fld: NormalizedField) -> bool:
     return (
         fld.is_optional
@@ -306,14 +362,14 @@ def _can_skip(fld: NormalizedField) -> bool:
     )
 
 
-def _get_contextual_name(step: SessionStart | InputStep | ContextStep) -> str:
+def _get_name(step: SessionStart | InputStep | ContextEntry) -> str:
     """
     Return the field name by default.
 
     If the current context crosses a container-entry boundary
     (skip_target), return the schema type name instead.
     """
-    to_check = step if isinstance(step, (SessionStart, ContextStep)) else step.parent
+    to_check = step if isinstance(step, (SessionStart, ContextEntry)) else step.parent
 
     while True:
         # Default case
