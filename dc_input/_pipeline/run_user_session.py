@@ -20,7 +20,6 @@ from dc_input._types import (
     SessionResult,
     RepeatExit,
 )
-from dc_input._pipeline._utils import get_type_base_args
 
 
 BLUE = "\033[36m"
@@ -164,8 +163,7 @@ def _handle_input_step(
                 fld.shape,
                 (ContainerShape, DictShape, FixedContainerShape),
             ):
-                base_type, _ = get_type_base_args(fld.type_non_aliased)
-                v_parsed = base_type(v_parsed)
+                v_parsed = fld.type_non_aliased_base(v_parsed)
 
             res.append(UserInput(v_parsed, step_cur))
 

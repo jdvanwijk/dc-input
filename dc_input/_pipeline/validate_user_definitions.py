@@ -174,16 +174,17 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
         * only T | None unions are allowed (other Unions are ambiguous when parsing)
         * use of typing.Optional is not allowed (considered deprecated, and adds parsing complexity)
         * Nested unions are not allowed (example: list[T | None])
-    - List/Set/Tuple:
-        * may only nest one level (example: list[list[T]]). exception: nesting is not allowed when T is a schema
-        * may not contain nested dicts
     - Dicts:
         * may not contain nested schemas
         * may not contain nested dicts, lists, sets, tuples
+    - List/Set/Tuple:
+        * may only nest one level (example: list[list[T]]). exception: nesting is not allowed when T is a schema
+        * may not contain nested dicts
+    - Set:
+        * Schemas contained in a set must be hashable (frozen=True)
     - Fixed-size Tuple containing schemas:
-        * must contain only schemas
+        * must be homogenuous
         * must contain at least two schemas (user should use T instead of tuple[T])
-        * must be homogeneous
     """
     if _errors is None:
         _errors = []
@@ -248,8 +249,6 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
                 )
 
         # list, set, tuple[T, ...]
-        # TODO [MID]: Check if schemacontainers that expect hashable type (mainly set), gets a FROZEN dataclass instance
-
         if alt_issubclass(t, (list, set, tuple)):
             depth = _max_container_depth(t)
             if depth > 2:
@@ -267,6 +266,15 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
                         f"Lists, sets and tuples may not contain nested dicts. "
                         f"[schema: {sc.__name__}, field: '{name}']"
                     )
+
+        if alt_issubclass(t, set):
+            sc_nested = find_schema_in_type(t)
+            if sc_nested and not sc_nested.__dataclass_params__.frozen:
+                _errors.append(
+                    f"Schemas contained in sets must be frozen "
+                    f"(Hint: set frozen=True in the dataclass constructor) "
+                    f"[schema: {sc.__name__}, field: '{name}']"
+                )
 
         # dict
         if alt_issubclass(t, dict):

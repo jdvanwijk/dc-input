@@ -18,7 +18,7 @@ from .._types import (
     FixedContainerShape,
     ContainerShape,
 )
-from dc_input._pipeline._utils import is_child_path, get_type_base_args
+from dc_input._pipeline._utils import is_child_path
 
 T = TypeVar("T")
 
@@ -74,8 +74,7 @@ def _build_context_instance(
 
         # ── Repeated schema ───────────────────────────
         elif isinstance(fld.shape, SchemaContainerShape):
-            container_t, _ = get_type_base_args(fld.shape.container_type)
-            res = container_t(
+            res = fld.shape.container_type(
                 _build_repeated_context(
                     child,
                     context_inputs,
@@ -83,9 +82,8 @@ def _build_context_instance(
             )
 
             # Wrap in unaliased container type when necessary
-            non_aliased_t, _ = get_type_base_args(fld.type_non_aliased)
-            if non_aliased_t != container_t:
-                res = non_aliased_t(res)
+            if fld.type_non_aliased_base != fld.shape.container_type:
+                res = fld.type_non_aliased_base(res)
 
             values[name] = _wrap_unaliased(fld, res)
 
@@ -202,10 +200,8 @@ def _wrap_unaliased(
     fld: NormalizedField[ContainerShape | FixedContainerShape | SchemaContainerShape],
     to_wrap: Any,
 ) -> Any:
-    non_aliased_t, _ = get_type_base_args(fld.type_non_aliased)
-    container_t = fld.shape.container_type
-    if non_aliased_t != container_t:
-        return non_aliased_t(to_wrap)
+    if fld.type_non_aliased_base != fld.shape.container_type:
+        return fld.type_non_aliased_base(to_wrap)
     return to_wrap
 
 

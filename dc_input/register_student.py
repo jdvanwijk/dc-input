@@ -6,7 +6,6 @@ import json
 import os
 from pathlib import Path
 from pprint import pprint
-import re
 import tempfile
 from typing import Annotated
 
@@ -66,12 +65,9 @@ class Instrument:
 # Helpers
 # ------------------------------------------------------------
 def parse_date_dmy(s: str) -> datetime.date:
-    s_normalized = s.strip().replace(".", "/").replace("-", "/")
-    date = "/".split(s_normalized)
+    s = s.strip().replace(".", "/").replace("-", "/")
     try:
-        day = int(date[0])
-        month = int(date[1])
-        year = int(date[2])
+        day, month, year = map(int, s.split("/"))
     except Exception:
         raise ValueError("wrong format, must be DD/MM/YYYY")
     else:

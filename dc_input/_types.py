@@ -3,7 +3,8 @@ from __future__ import annotations
 from abc import ABC
 from collections.abc import Callable
 from dataclasses import dataclass, field, fields, _MISSING_TYPE, MISSING, is_dataclass
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any, Generic, Literal, TypeVar, get_origin
+
 
 
 # ---------- UserInput ----------
@@ -204,6 +205,16 @@ class NormalizedField(Generic[T]):
     annotation: str | None
 
     shape: T
+
+    @property
+    def type_non_aliased_base(self) -> type:
+        """Origin of type_non_aliased, or type_non_aliased when no origin exists."""
+
+        t = self.type_non_aliased
+        origin = get_origin(t)
+
+        return origin or t
+
 
     def __repr__(self) -> str:
         return _format_repr(self)

@@ -48,13 +48,21 @@ def get_input(
     schema : type[T]
         The root dataclass type to construct.
 
+        Schema rules:
+
+        - The only supported ``Union`` is ``T | None``.
+        - ``list``, ``set`` and ``tuple`` may only nest one level
+          (a nested schema counts as one level).
+        - ``dict`` values may not be containers or schemas.
+        - Fixed-size ``tuple`` schemas must be homogeneous.
+
     container_aliases : ContainerAliasRegistry | None, optional
         Mapping that allows registering container-like classes that are not
         subclasses of ``dict``, ``list``, ``set``, or ``tuple``. Subclasses of these
         built-in containers are handled automatically.
 
         The mapping key is the unparameterized container-like type; the value is
-        a concrete container type used internally (e.g. ``list``).
+        the container type used internally (e.g. ``list`` or ``list[int]``).
 
     parsers : ParserRegistry | None, optional
         Mapping from types to parsing functions. Parsers are required for types
@@ -76,32 +84,44 @@ def get_input(
 
     Examples
     --------
-    >>> from dataclasses import dataclass
-    >>> import datetime
-    >>> import re
-    >>>
-    >>> class Foo[T]:   # Custom container-like
-    ...     def __init__(self, items: list[T]) -> None:
-    ...         self._items = items
-    >>>
-    >>> def parse_date_dmy(s: str) -> datetime.date:    # Parser
-    ...     s_normalized = s.strip().replace(".", "/").replace("-", "/")
-    ...     date = "/".split(s_normalized)
-    ...     try:
-    ...         day = int(date[0])
-    ...         month = int(date[1])
-    ...         year = int(date[2])
-    ...     except Exception:
-    ...         raise ValueError("wrong format, must be DD/MM/YYYY")
-    ...     else:
-    ...         return datetime.date(year, month, day)
-    >>>
-    >>> @dataclass   # Schema
-    ... class Bar:
-    ...
+    **To place default fields before non-default fields, set** ``kw_only=True``::
 
-    >>> container_aliases = {Foo: list}
-    >>> parsers = {datetime.date: parse_date_dmy}
+        from dataclasses import dataclass
+
+        @dataclass(kw_only=True)
+        class Schema:
+            val1: str = "default"
+            val2: int
+
+    **Register a custom parser for** ``datetime.date``::
+
+        import datetime
+
+        def parse_date_dmy(s: str) -> datetime.time
+            s = s.strip().replace(".", "/").replace("-", "/")
+            try:
+                day, month, year = map(int, s.split("/"))
+            except Exception:
+                raise ValueError("wrong format, must be DD/MM/YYYY")
+            else:
+                return datetime.date(year, month, day)
+
+        parsers = {datetime.date: parse_date_dmy}
+
+    **Register container aliases for non-standard container types**::
+
+        class GenericContainerLike[T]:
+            def __init__(self, items: list[T]) -> None:
+                self._items = items
+
+        class SpecificContainerLike:
+            def __init__(self, items: list[int]) -> None:
+                self._items = items
+
+        container_aliases = {
+            GenericContainerLike: list,
+            SpecificContainerLike: list[int],
+        }
     """
     log_schema(schema)
 
