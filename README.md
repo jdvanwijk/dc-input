@@ -7,14 +7,14 @@
 Features include nested schemas, repeatable containers, undo support, defaults, optional fields, and custom parsers.
 Useful for quick data entry, prototyping, or structured configuration; integrates easily with your own CLI tools.
 
+---
+
 ## Why dc-input?
 If you’ve ever written a script that prompts for input, validates values, and parses the result, you’ve probably 
 noticed how boilerplate-y and bug-prone this can be.
 
 `dc-input` replaces all that *with a single function call*.
 
-
----
 ## Installation
 ```bash
 pip install dc-input
