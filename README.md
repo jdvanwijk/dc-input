@@ -6,7 +6,7 @@
 **Interactively fill dataclass instances via the command line.** 
 Features include nested schemas, repeatable containers, undo support, defaults, optional fields, and custom parsers.
 Useful for quick data entry, prototyping, or structured configuration; integrates easily with your own CLI tools.
---- 
+
 ## Why dc-input?
 If you’ve ever written a script that prompts for input, validates values, and parses the result, you’ve probably 
 noticed how boilerplate-y and bug-prone this can be.
@@ -19,7 +19,6 @@ noticed how boilerplate-y and bug-prone this can be.
 ```bash
 pip install dc-input
 ```
----
 ## Quick Start
 ```python
 from dataclasses import dataclass
@@ -34,14 +33,12 @@ user = get_input(User)
 print(user)
 ```
 
----
 ## Usage
 Define your dataclasses as usual, then call `get_input()` to interactively collect values. 
 `dc-input` walks your dataclass schema and interactively prompts for values, handling nesting, repetition, defaults, 
 and validation automatically. At any prompt, type `..` to undo the previous input: this even works across nested schemas.
 
 
----
 ## Complete Example
 
 Below is a full, self-contained script that:
@@ -205,7 +202,7 @@ MusicStudent(id=14321,
                                                        'what that means')],
              comments='seems v. talented')
 ```
----
+
 ## Roadmap
 - Extensive testing (help welcome, see below!)
 - Adapter for `attrs`
@@ -213,7 +210,7 @@ MusicStudent(id=14321,
 - Translations
 - User-customizable UX
 
----
+
 ## Contributions
 ### Testing
 Help with testing is very welcome.
