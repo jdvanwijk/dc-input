@@ -1,16 +1,31 @@
-import dataclasses
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import is_dataclass
-from pprint import pprint
 from typing import TypeVar, Any
 
-from dc_input._types import UserInput, SessionStart, InputStep, KeyPath, SessionEnd, ContextEntry, SchemaContainerShape, \
-    RepeatExit, SchemaShape, NormalizedField, SessionStep
-from dc_input._utils import is_child_path, get_type_base_args
+from .._types import (
+    UserInput,
+    SessionStart,
+    InputStep,
+    KeyPath,
+    ContextEntry,
+    SchemaContainerShape,
+    RepeatExit,
+    SchemaShape,
+    NormalizedField,
+    SessionStep,
+    FixedSchemaContainerShape,
+    FixedContainerShape,
+    ContainerShape,
+)
+from dc_input._pipeline._utils import is_child_path, get_type_base_args
 
 T = TypeVar("T")
 
 
+# ------------------------------------------------------------
+# Main initialization functions
+# ------------------------------------------------------------
 def initialize_schema(schema: type[T], inputs: list[UserInput]) -> T:
     assert inputs
     assert is_dataclass(schema)
@@ -21,113 +36,86 @@ def initialize_schema(schema: type[T], inputs: list[UserInput]) -> T:
         cur = cur.parent
     start = cur
 
-    context_inputs = collect_context_inputs(inputs)
+    context_inputs = _collect_context_inputs(inputs)
 
     # Root behaves like a context with path ()
-    children = list(iter_root_children(start))
+    children = list(_iter_root_children(start))
 
-    return build_context_instance(
+    return _build_context_instance(
         schema_type=schema,
-        ctx_path=(),
+        context_path=(),
         children=children,
         context_inputs=context_inputs,
         iteration=0,
     )
 
 
-    # assert is_dataclass(schema)
-    # assert inputs
-    #
-    # graph_start = inputs[0].input_step.parent
-    # while not isinstance(
-    #     graph_start, SessionStart
-    # ):  # Case: first graph_step after GraphStart is Node
-    #     graph_start = graph_start.parent
-    #
-    # nodes: dict[KeyPath, ContextEntry] = {}
-    # cur = graph_start.next
-    # while not isinstance(cur, SessionEnd):
-    #     if isinstance(cur, ContextEntry):
-    #         nodes[cur.field.path] = cur
-    #     cur = cur.next
-    #
-    # input_values: dict[KeyPath, dict[int, dict[str, Any]]] = defaultdict(
-    #     lambda: defaultdict(dict)
-    # )
-    # seen_paths: dict[KeyPath, int] = {}
-    # for inpt in inputs:
-    #     inpt_key = inpt.input_step.name
-    #     inpt_path = inpt.input_step.field.path
-    #     if isinstance(inpt.input_step.parent, SessionStart):
-    #         node_path = ()
-    #     else:
-    #         node_path = inpt.input_step.parent.field.path
-    #
-    #     if inpt_path in seen_paths:
-    #         n_repeat = seen_paths[inpt_path] + 1
-    #     else:
-    #         n_repeat = 0
-    #     seen_paths[inpt_path] = n_repeat
-    #
-    #     input_values[node_path][n_repeat][inpt_key] = inpt.value
-    #
-    # print(input_values)
+def _build_context_instance(
+    *,
+    schema_type: type,
+    context_path: KeyPath,
+    children: list[SessionStep],
+    context_inputs: Any,
+    iteration: int,
+) -> Any:
+    values = {}
+    inputs = context_inputs.get(context_path, {}).get(iteration, {})
 
-    # initialized: list[Any] = []
-    # node_paths_to_process = list(nodes.keys())
-    # processed_node_paths: list[KeyPath] = []
-    # while processed_node_paths != list(nodes.keys()):
-    #     for path_cur, node in nodes.items():
-    #         if path_cur in processed_node_paths:
-    #             continue
-    #         elif any(is_child_path(path_cur, path) for path in node_paths_to_process):
-    #             continue
-    #
-    #         data = input_values[path_cur]
-    #         if isinstance(node.field.shape, SchemaContainerShape):
-    #            pass
+    for child in children:
+        fld = child.field
+        name = child.name
 
+        # ── Nested schema ─────────────────────────────
+        if isinstance(child, ContextEntry) and isinstance(fld.shape, SchemaShape):
+            values[name] = _build_context(
+                child,
+                context_inputs,
+            )
 
-    pprint(input_values)
+        # ── Repeated schema ───────────────────────────
+        elif isinstance(fld.shape, SchemaContainerShape):
+            container_t, _ = get_type_base_args(fld.shape.container_type)
+            res = container_t(
+                _build_repeated_context(
+                    child,
+                    context_inputs,
+                )
+            )
+
+            # Wrap in unaliased container type when necessary
+            non_aliased_t, _ = get_type_base_args(fld.type_non_aliased)
+            if non_aliased_t != container_t:
+                res = non_aliased_t(res)
+
+            values[name] = _wrap_unaliased(fld, res)
+
+        # ── Terminal input ────────────────────────────
+        else:
+            inpt = inputs[name]
+            if isinstance(fld.shape, (FixedContainerShape, FixedSchemaContainerShape)):
+                container_t, _ = fld.shape.container_type
+                assert isinstance(inpt, container_t)
+                values[name] = _wrap_unaliased(fld, inputs[name])
+            else:
+                values[name] = inpt
+
+    return schema_type(**values)
 
 
-    return inputs
+def _build_context(
+    context: ContextEntry,
+    context_inputs: Any,
+) -> Any:
+    schema_type = context.field.shape.schema_type
+    context_path = context.field.path
 
-def build_repeated_context(
-    ctx: ContextEntry,
-    context_inputs,
-):
-    ctx_path = ctx.field.path
-    iterations = context_inputs.get(ctx_path, {})
-
-    children = list(iter_context_children(ctx))
-    schema_type = ctx.field.shape.schema_type
-
-    return [
-        build_context_instance(
-            schema_type=schema_type,
-            ctx_path=ctx_path,
-            children=children,
-            context_inputs=context_inputs,
-            iteration=i,
-        )
-        for i in sorted(iterations)
-    ]
-
-def build_context(
-    ctx: ContextEntry,
-    context_inputs,
-):
-    schema_type = ctx.field.shape.schema_type
-    ctx_path = ctx.field.path
-
-    iterations = context_inputs.get(ctx_path, {0: {}})
-    children = list(iter_context_children(ctx))
+    iterations = context_inputs.get(context_path, {0: {}})
+    children = list(_iter_context_children(context))
 
     instances = [
-        build_context_instance(
+        _build_context_instance(
             schema_type=schema_type,
-            ctx_path=ctx_path,
+            context_path=context_path,
             children=children,
             context_inputs=context_inputs,
             iteration=i,
@@ -137,84 +125,32 @@ def build_context(
 
     return instances if len(instances) > 1 else instances[0]
 
-def build_context_instance(
-    *,
-    schema_type: type,
-    ctx_path: KeyPath,
-    children: list[SessionStep],
-    context_inputs,
-    iteration: int,
-):
-    values = {}
-    inputs = context_inputs.get(ctx_path, {}).get(iteration, {})
 
-    for child in children:
-        field = child.field
-        name = child.name
+def _build_repeated_context(context: ContextEntry, context_inputs: Any) -> Any:
+    context_path = context.field.path
+    iterations = context_inputs.get(context_path, {})
 
-        # ── Nested schema ─────────────────────────────
-        if isinstance(child, ContextEntry) and isinstance(field.shape, SchemaShape):
-            values[name] = build_context(
-                child,
-                context_inputs,
-            )
+    children = list(_iter_context_children(context))
+    schema_type = context.field.shape.schema_type
 
-        # ── Repeated schema ───────────────────────────
-        elif isinstance(field.shape, SchemaContainerShape):
-            container_t, _ = get_type_base_args(child.field.shape.container_type)
-            res = container_t(build_repeated_context(
-                child,
-                context_inputs,
-            ))
-
-            # Handle registered container aliases
-            unaliased_container_t, _ = get_type_base_args(child.field.type)
-            if unaliased_container_t != container_t:
-                res = unaliased_container_t(res)
-
-            values[name] = res
-
-        # ── Terminal input ────────────────────────────
-        else:
-            if name in inputs:
-                values[name] = inputs[name]
-            elif field.default is not dataclasses.MISSING:
-                values[name] = field.default
-            elif field.default_factory is not dataclasses.MISSING:
-                values[name] = field.default_factory()
-            elif field.is_optional:
-                values[name] = None
-            else:
-                raise ValueError(f"Missing required field {field.path}")
-
-    return schema_type(**values)
-
-def iter_root_children(start: SessionStart):
-    cur = start.next
-    while cur:
-        if isinstance(cur, (InputStep, ContextEntry)) and cur.parent is start:
-            yield cur
-        cur = cur.next
+    return [
+        _build_context_instance(
+            schema_type=schema_type,
+            context_path=context_path,
+            children=children,
+            context_inputs=context_inputs,
+            iteration=i,
+        )
+        for i in sorted(iterations)
+    ]
 
 
-def iter_context_children(ctx: ContextEntry):
-    cur = ctx.next
-    while cur:
-        if isinstance(cur, RepeatExit):
-            break
-
-        if isinstance(cur, (InputStep, ContextEntry)):
-            if cur.parent is ctx:
-                yield cur
-            elif not is_child_path(ctx.field.path, cur.field.path):
-                break
-
-        cur = cur.next
-
-
-from collections import defaultdict
-
-def collect_context_inputs(inputs: list[UserInput]):
+# ------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------
+def _collect_context_inputs(
+    inputs: list[UserInput],
+) -> dict[KeyPath, dict[int, dict[str, Any]]]:
     """
     Maps:
       context_path -> iteration -> field_name -> value
@@ -237,3 +173,40 @@ def collect_context_inputs(inputs: list[UserInput]):
         context_inputs[ctx_path][iteration][step.name] = ui.value
 
     return context_inputs
+
+
+def _iter_root_children(start: SessionStart) -> Iterator[Any]:
+    cur = start.next
+    while cur:
+        if isinstance(cur, (InputStep, ContextEntry)) and cur.parent is start:
+            yield cur
+        cur = cur.next
+
+
+def _iter_context_children(context: ContextEntry) -> Iterator[Any]:
+    cur = context.next
+    while cur:
+        if isinstance(cur, RepeatExit):
+            break
+
+        if isinstance(cur, (InputStep, ContextEntry)):
+            if cur.parent is context:
+                yield cur
+            elif not is_child_path(context.field.path, cur.field.path):
+                break
+
+        cur = cur.next
+
+
+def _wrap_unaliased(
+    fld: NormalizedField[ContainerShape | FixedContainerShape | SchemaContainerShape],
+    to_wrap: Any,
+) -> Any:
+    non_aliased_t, _ = get_type_base_args(fld.type_non_aliased)
+    container_t = fld.shape.container_type
+    if non_aliased_t != container_t:
+        return non_aliased_t(to_wrap)
+    return to_wrap
+
+
+# TODO [LOW]: See if I can make return types more precise, probably use Generics

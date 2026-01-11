@@ -13,8 +13,8 @@ from typing import (
     Optional,
 )
 
-from dc_input._types import ContainerAliasRegistry, ParserRegistry
-from dc_input._utils import (
+from .._types import ContainerAliasRegistry, ParserRegistry
+from dc_input._pipeline._utils import (
     alt_issubclass,
     get_type_base_args,
     find_schema_in_type,
@@ -60,7 +60,7 @@ def _get_container_registry_errors(registry: ContainerAliasRegistry) -> list[str
     Enforced rules:
     - Registry must be a dict.
     - Keys and values must be concrete, non-parameterized types.
-    - Values must be concrete, non-parameterized dict, list, set, or tuple types.
+    - Values must be concrete, non-parameterized subclasses of dict, list, set, or tuple.
 
     Returns a list of error messages describing all detected violations.
     """
@@ -89,9 +89,9 @@ def _get_container_registry_errors(registry: ContainerAliasRegistry) -> list[str
             )
 
         substitue_t_base, _ = get_type_base_args(substitute_t)
-        if not substitue_t_base in (dict, list, set, tuple):
+        if not alt_issubclass(substitue_t_base, (dict, list, set, tuple)):
             errors.append(
-                f"Registry values must be concrete type of dict, list, set or tuple, got "
+                f"Registry values must be subclass of dict, list, set or tuple, got "
                 f"'{substitute_t.__name__}' at key '{container_t.__name__}'"
             )
 
@@ -248,6 +248,8 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
                 )
 
         # list, set, tuple[T, ...]
+        # TODO [MID]: Check if schemacontainers that expect hashable type (mainly set), gets a FROZEN dataclass instance
+
         if alt_issubclass(t, (list, set, tuple)):
             depth = _max_container_depth(t)
             if depth > 2:
@@ -349,4 +351,5 @@ def _has_nested_union_type(t: type | UnionType) -> bool:
 
     return False
 
-# TODO: Check if schemacontainers that expect hashable type (mainly set), gets a FROZEN dataclass instance
+
+# TODO [LOW]: add a WrongSchema example for documentation

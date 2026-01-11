@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dc_input._types import ParserRegistry
+from .._types import ParserRegistry
 
 
 # ------------------------------------------------------------
@@ -20,7 +20,7 @@ def _parse_float(s: str) -> float:
     try:
         return float(s)
     except (TypeError, ValueError):
-        raise ValueError("must be a number")
+        raise ValueError("'float' must be a number")
 
 
 def _parse_int(s: str) -> int:
@@ -28,7 +28,7 @@ def _parse_int(s: str) -> int:
     try:
         return int(s)
     except (TypeError, ValueError):
-        raise ValueError("must be a round number")
+        raise ValueError("'int' must be a round number")
 
 
 def _parse_str(s: str) -> str:

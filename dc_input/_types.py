@@ -12,8 +12,7 @@ class UserInput:
     """
     Captures a concrete value entered by the user during a session.
 
-    Associates the raw value with the InputStep that produced it,
-    enabling reconstruction.
+    Associates the raw value with the InputStep that produced it.
     """
 
     value: Any
@@ -56,7 +55,7 @@ class ContextEntry(SessionStep):
     traversal of child InputSteps, ContextEntries and ContextExits.
     """
 
-    field: NormalizedField[ExpandableShape]
+    field: NormalizedField[ContextShape]
     position_info: PositionInfo | None = None
 
     parent: SessionStart | ContextEntry | None = None
@@ -69,7 +68,7 @@ class ContextEntry(SessionStep):
         return self.field.path[-1]
 
     def __post_init__(self) -> None:
-        assert isinstance(self.field.shape, ExpandableShape)
+        assert isinstance(self.field.shape, ContextShape)
 
     def __repr__(self) -> str:
         return _format_repr(self)
@@ -89,18 +88,15 @@ class PositionInfo:
 class InputStep(SessionStep):
     """
     Session step representing a single unit of user input.
-
-    InputSteps correspond one-to-one with TerminalShapes and produce a concrete
-    value that contributes to the final result.
     """
 
-    field: NormalizedField[TerminalShape]
+    field: NormalizedField[InputShape]
     parent: SessionStart | ContextEntry | None = None
     prev: SessionStart | ContextEntry | InputStep | None = None
     next: ContextEntry | InputStep | SessionEnd | None = None
 
     def __post_init__(self) -> None:
-        assert isinstance(self.field.shape, TerminalShape)
+        assert isinstance(self.field.shape, InputShape)
 
     @property
     def name(self) -> str:
@@ -112,14 +108,14 @@ class InputStep(SessionStep):
 
 @dataclass
 class RepeatExit(SessionStep):
-    context: ContextEntry
+    parent: ContextEntry
     element_start: ContextEntry | InputStep
     prev: SessionStep | None = None
     next: SessionStep | None = None
     name: str = field(init=False)
 
     def __post_init__(self) -> None:
-        self.name = f"RepeatExit for '{self.context.name}'"
+        self.name = f"RepeatExit for '{self.parent.name}'"
 
     def __repr__(self) -> str:
         return _format_repr(self)
@@ -161,7 +157,7 @@ def _format_repr(obj: Any) -> str:
 
 
 # ---------- NormalizedField ----------
-T = TypeVar("T", "ExpandableShape", "TerminalShape")
+T = TypeVar("T", "ContextShape", "InputShape")
 
 
 @dataclass(frozen=True)
@@ -178,8 +174,8 @@ class NormalizedField(Generic[T]):
         Fully-qualified key path to this field within the root schema.
         Used for naming and result assembly.
 
-    type:
-        The original Python type annotation of the field, stripped of Annotation and UnionType.
+    type_non_aliased:
+        Unaliased type of the field, stripped of Annotation and UnionType.
 
     is_optional:
         True when the original type annotation was UnionType[T, None].
@@ -191,7 +187,7 @@ class NormalizedField(Generic[T]):
         Callable producing a default value, or MISSING if none exists.
 
     annotation:
-        Optional human-readable annotation (e.g. format hints, descriptions)
+        Optional annotation (e.g. format hints, descriptions)
         used for UX presentation.
 
     shape:
@@ -201,7 +197,7 @@ class NormalizedField(Generic[T]):
     """
 
     path: KeyPath
-    type: type
+    type_non_aliased: type
     is_optional: bool
     default: Any | Literal[_MISSING_TYPE.MISSING]
     default_factory: Callable[[], Any] | Literal[_MISSING_TYPE.MISSING]
@@ -213,33 +209,27 @@ class NormalizedField(Generic[T]):
         return _format_repr(self)
 
 
-# ---------- ExpandableShape, TerminalShape ----------
+# ---------- ContextShape, InputShape ----------
 @dataclass(frozen=True)
-class ExpandableShape(ABC):
+class ContextShape(ABC):
     """
     Marker base class for shapes that expand into nested schema traversal.
-
-    ExpandableShapes do not directly collect user input. Instead, they introduce
-    one or more ContextSteps into the session graph.
     """
 
     pass
 
 
 @dataclass(frozen=True)
-class TerminalShape(ABC):
+class InputShape(ABC):
     """
     Marker base class for shapes that are collected as terminal user input.
-
-    TerminalShapes always correspond to exactly one InputStep in the session graph,
-    even if their resulting Python value is structurally complex (e.g. containers).
     """
 
     pass
 
 
 @dataclass(frozen=True)
-class FixedSchemaContainerShape(ExpandableShape):
+class FixedSchemaContainerShape(ContextShape):
     """
     Shape representing a homogenuous, fixed-size container of schemas.
 
@@ -253,7 +243,7 @@ class FixedSchemaContainerShape(ExpandableShape):
 
 
 @dataclass(frozen=True)
-class SchemaShape(ExpandableShape):
+class SchemaShape(ContextShape):
     """
     Shape representing a dataclass schema.
 
@@ -264,7 +254,7 @@ class SchemaShape(ExpandableShape):
 
 
 @dataclass(frozen=True)
-class SchemaContainerShape(ExpandableShape):
+class SchemaContainerShape(ContextShape):
     """
     Shape representing a homogenuous container of dataclass schemas (e.g. list[T]).
 
@@ -276,7 +266,7 @@ class SchemaContainerShape(ExpandableShape):
 
 
 @dataclass(frozen=True)
-class AtomicShape(TerminalShape):
+class AtomicShape(InputShape):
     """
     AtomicShape represents values that are entered as a single unit and do not expand into nested
     schema traversal, regardless of their underlying Python type.
@@ -286,7 +276,7 @@ class AtomicShape(TerminalShape):
 
 
 @dataclass(frozen=True)
-class ContainerShape(TerminalShape):
+class ContainerShape(InputShape):
     """
     Shape representing a homogeneous container of terminal elements.
 
@@ -299,7 +289,7 @@ class ContainerShape(TerminalShape):
 
 
 @dataclass(frozen=True)
-class DictShape(TerminalShape):
+class DictShape(InputShape):
     """
     Shape representing a dictionary entered as terminal input.
 
@@ -311,7 +301,7 @@ class DictShape(TerminalShape):
 
 
 @dataclass(frozen=True)
-class FixedContainerShape(TerminalShape):
+class FixedContainerShape(InputShape):
     """
     Shape representing a fixed-size container of terminal elements.
 
@@ -325,7 +315,7 @@ class FixedContainerShape(TerminalShape):
 
 
 @dataclass(frozen=True)
-class LiteralShape(TerminalShape):
+class LiteralShape(InputShape):
     """
     Shape representing a Literal[...] value.
 

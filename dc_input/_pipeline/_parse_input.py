@@ -12,7 +12,7 @@ from dc_input._types import (
     LiteralShape,
 )
 
-from dc_input._utils import alt_issubclass
+from dc_input._pipeline._utils import alt_issubclass
 
 
 # ------------------------------------------------------------
@@ -58,7 +58,7 @@ def _coerce(
     elif isinstance(shape, FixedContainerShape):
         if len(value) != len(shape.elements):
             raise ValueError(
-                f"invalid number of values (required: {len(shape.elements)}"
+                f"invalid number of values (required: {len(shape.elements)})"
             )
         return shape.container_type(
             _coerce(v, el, registry) for v, el in zip(value, shape.elements)
@@ -168,10 +168,3 @@ def _select_parser(base: Any, registry: ParserRegistry) -> ParserFunc:
     if parser := registry.get(base):
         return parser
     return lambda s: base(s)
-
-
-# TODO: Fix error-message for invalid amount of parentheses in list[T]
-# middle? <str, ...> : (hollo, ja
-# > Invalid input: Missing closing ')'. -> Should already error for using parentheses at all
-# middle? <str, ...> : ((hollo)), ja
-# > Invalid input: 'list' object has no attribute 'strip'. -> Same here

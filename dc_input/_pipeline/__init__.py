@@ -1,6 +1,6 @@
 from .build_session_graph import build_session_graph
 from .initialize_schema import initialize_schema
-from .normalize_schema import normalize_schema
 from .merge_parsers import merge_parsers
+from .normalize_schema import normalize_schema
 from .run_user_session import run_user_session
 from .validate_user_definitions import validate_user_definitions

@@ -1,7 +1,3 @@
-# Invariant:
-# The session graph is constructed in preorder by KeyPath.
-# All child paths appear contiguously after their parent.
-
 from __future__ import annotations
 
 from dataclasses import replace
@@ -21,11 +17,10 @@ from dc_input._types import (
     FixedSchemaContainerShape,
     PositionInfo,
     KeyPath,
-    SchemaShape,
     SchemaContainerShape,
     RepeatExit,
 )
-from dc_input._utils import is_child_path
+from dc_input._pipeline._utils import is_child_path
 
 
 def build_session_graph(sc: NormalizedSchema, base_name: str) -> SessionStart:
@@ -127,7 +122,7 @@ def _add_repeat_exits(steps: list[SessionStep]) -> list[SessionStep]:
         if isinstance(step_cur, ContextEntry) and isinstance(
             step_cur.field.shape, SchemaContainerShape
         ):
-            rxt = RepeatExit(context=step_cur, element_start=steps[i + 1])
+            rxt = RepeatExit(parent=step_cur, element_start=steps[i + 1])
             remaining = steps[i + 1 :]
             next_non_child = _find_next_non_child(remaining, step_cur)
             pending.insert(0, (next_non_child, rxt))
@@ -144,6 +139,10 @@ def _add_repeat_exits(steps: list[SessionStep]) -> list[SessionStep]:
 
 
 def _add_skips(steps: list[SessionStep]) -> list[SessionStep]:
+    # TODO [HIGH]: is_optional (non SchemaContainer) should skip to the step
+    #  after the last descendant InputStep, not directly before the first non-child field:
+    #  these aren't always the same!
+
     res: list[SessionStep] = []
 
     for i, step_cur in enumerate(steps):
@@ -155,7 +154,7 @@ def _add_skips(steps: list[SessionStep]) -> list[SessionStep]:
         shape = step_cur.field.shape
         if isinstance(shape, SchemaContainerShape):
             for i_remaining, step in enumerate(remaining):
-                if isinstance(step, RepeatExit) and step.context is step_cur:
+                if isinstance(step, RepeatExit) and step.parent is step_cur:
                     skip_target = remaining[i_remaining + 1]
                     step_cur.skip_target = skip_target
                     break

@@ -14,32 +14,10 @@ from typing import (
     Annotated,
 )
 
-from dc_input._types import KeyPath
+from _types import KeyPath
 
 T = TypeVar("T")
 U = TypeVar("U")
-
-
-def rgetitem(d: Mapping[T, U], ks: Iterable[T]) -> U:
-    """Get item through an iterable of keys."""
-    tmp = d
-    for k in ks:
-        tmp = tmp[k]
-
-    return tmp
-
-
-def rsetitem(d: MutableMapping[T, U], ks: Iterable[T], v: U) -> None:
-    """Set item through an iterable of keys."""
-    ks = list(ks)
-    tmp = d
-    for i, k in enumerate(ks):
-        if i == len(ks) - 1:
-            tmp[k] = v
-        else:
-            if k not in tmp:
-                tmp[k] = {}
-            tmp = tmp[k]
 
 
 def get_type_base_args(t: Any) -> tuple[Any, tuple[Any, ...]]:

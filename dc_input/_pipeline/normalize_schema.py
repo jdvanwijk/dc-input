@@ -4,7 +4,7 @@ from dataclasses import fields, is_dataclass, make_dataclass
 from types import UnionType
 from typing import Any, get_type_hints, Literal, Annotated
 
-from dc_input._types import (
+from .._types import (
     NormalizedSchema,
     ContainerAliasRegistry,
     KeyPath,
@@ -16,9 +16,9 @@ from dc_input._types import (
     LiteralShape,
     DictShape,
     AtomicShape,
-    SchemaContainerShape, ExpandableShape, TerminalShape,
+    SchemaContainerShape, ContextShape, InputShape,
 )
-from dc_input._utils import (
+from dc_input._pipeline._utils import (
     get_type_base_args,
     get_optional_non_none,
     alt_issubclass,
@@ -83,7 +83,7 @@ def normalize_schema(
 
         _res[path_cur] = NormalizedField(
             path=path_cur,
-            type=field_type,
+            type_non_aliased=field_type,
             is_optional=is_optional,
             default=default,
             default_factory=default_factory,
@@ -98,7 +98,7 @@ def normalize_schema(
     return _res
 
 
-def _get_shape(base: type, args: tuple[Any, ...]) -> ExpandableShape | TerminalShape:
+def _get_shape(base: type, args: tuple[Any, ...]) -> ContextShape | InputShape:
     if is_dataclass(base):
         # SchemaShape
         return SchemaShape(base)

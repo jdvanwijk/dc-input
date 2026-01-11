@@ -1,8 +1,27 @@
+from dataclasses import fields, is_dataclass, asdict
 import logging
+from typing import Any, get_type_hints
 
-from ._types import NormalizedSchema, SessionStart, SessionEnd
+from dc_input._types import NormalizedSchema, SessionStart, SessionEnd, KeyPath, SessionResult
 
 logger = logging.getLogger("dc_input")
+
+
+def log_schema(sc: Any) -> None:
+    logger.debug("===== SCHEMA =====")
+
+    def _log(sc: Any, _path: KeyPath = ()) -> None:
+        type_hints = get_type_hints(sc)
+
+        for f in fields(sc):
+            path_new = _path + (f.name,)
+            logger.debug("%s : %r", path_new, f)
+
+            t = type_hints[f.name]
+            if is_dataclass(t):
+                _log(t, path_new)
+
+    _log(sc)
 
 
 def log_normalized_schema(sc: NormalizedSchema) -> None:
@@ -21,3 +40,17 @@ def log_session_graph(start: SessionStart) -> None:
         if isinstance(cur, SessionEnd):
             break
         cur = cur.next
+
+
+def log_session_result(res: SessionResult) -> None:
+    logger.debug("===== SESSION RESULT =====")
+    for inpt in res:
+        logger.debug("%r", inpt)
+
+
+def log_initialized_schema(sc: Any) -> None:
+    logger.debug("===== INITIALIZED SCHEMA =====")
+
+    sc_dict = asdict(sc)
+    for k, v in sc_dict.items():
+        logger.debug("%s : %r", k, v)
