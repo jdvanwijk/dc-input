@@ -24,7 +24,7 @@ T = TypeVar("T")
 
 
 # ------------------------------------------------------------
-# Main initialization functions
+# Main functions
 # ------------------------------------------------------------
 def initialize_schema(schema: type[T], inputs: list[UserInput]) -> T:
     assert inputs
@@ -32,7 +32,7 @@ def initialize_schema(schema: type[T], inputs: list[UserInput]) -> T:
 
     # Find SessionStart
     cur = inputs[0].input_step
-    while not isinstance(cur, SessionStart):
+    while cur.parent is not None:
         cur = cur.parent
     start = cur
 

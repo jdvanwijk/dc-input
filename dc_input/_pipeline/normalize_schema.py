@@ -16,7 +16,9 @@ from .._types import (
     LiteralShape,
     DictShape,
     AtomicShape,
-    SchemaContainerShape, ContextShape, InputShape,
+    SchemaContainerShape,
+    ContextShape,
+    InputShape,
 )
 from dc_input._pipeline._utils import (
     get_type_base_args,
@@ -26,6 +28,9 @@ from dc_input._pipeline._utils import (
 )
 
 
+# ------------------------------------------------------------
+# Main function
+# ------------------------------------------------------------
 def normalize_schema(
     sc: Any,
     container_aliases: ContainerAliasRegistry,
@@ -34,7 +39,7 @@ def normalize_schema(
 ) -> NormalizedSchema:
     """
     Convert a user-facing schema (dataclasses + typing annotations)
-    into a flat, explicit, and uniform representation for downstream processing.
+    into a flat, uniform representation for downstream processing.
 
     Produce a mapping from a field path (a tuple of nested field names)
     to a 'NormalizedField'. Each 'NormalizedField' contains a 'FieldShape'. This is a
@@ -67,17 +72,16 @@ def normalize_schema(
         # Assume UnionType is T | None
         is_optional = base_no_annotation is UnionType
 
-        # field_type: type without annotation and UnionType
+        # field_type: original type without annotation and UnionType
         if base_no_annotation is UnionType:
             field_type = get_optional_non_none(t_no_annotation)
         else:
             field_type = t_no_annotation
 
-        # shape_type: field_type or alias type
+        # shape_type: field_type or alias type (alias type has priority)
         base_shape, args_shape = get_type_base_args(field_type)
         if alias := container_aliases.get(base_shape):
-            # Assume non-parameterized
-            base_shape = alias
+            base_shape, args_shape = get_type_base_args(alias)
 
         shape = _get_shape(base_shape, args_shape)
 
@@ -96,6 +100,26 @@ def normalize_schema(
             normalize_schema(sc_nested, container_aliases, path_cur, _res)
 
     return _res
+
+
+# ------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------
+def _extract_annotation(t: type) -> tuple[type | UnionType, str]:
+    def _extract(t_with_annotation: type) -> str:
+        base, args = get_type_base_args(t_with_annotation)
+        if base is Annotated:
+            return args[1]
+        for arg in args:
+            return _extract(arg)
+        return ""
+
+    to_process = make_dataclass("ToProcess", [("type", t)])
+    t_without = get_type_hints(to_process)["type"]
+    t_with = get_type_hints(to_process, include_extras=True)["type"]
+    annotation = _extract(t_with)
+
+    return t_without, annotation
 
 
 def _get_shape(base: type, args: tuple[Any, ...]) -> ContextShape | InputShape:
@@ -124,6 +148,10 @@ def _get_shape(base: type, args: tuple[Any, ...]) -> ContextShape | InputShape:
         else:
             # Assume max depth == 2
             element = _get_shape(base_inner, args_inner)
+            assert isinstance(
+                element,
+                (AtomicShape, ContainerShape, FixedContainerShape, LiteralShape),
+            )
             return ContainerShape(base, element)
     elif alt_issubclass(base, tuple):
         # FixedContainerShape / FixedSchemaContainerShape
@@ -137,88 +165,18 @@ def _get_shape(base: type, args: tuple[Any, ...]) -> ContextShape | InputShape:
                 # Assume max depth == 2
                 base_inner, args_inner = get_type_base_args(arg)
                 elements.append(_get_shape(base_inner, args_inner))
+                assert all(
+                    isinstance(
+                        el,
+                        (
+                            AtomicShape,
+                            ContainerShape,
+                            FixedContainerShape,
+                            LiteralShape,
+                        ),
+                    )
+                    for el in elements
+                )
             return FixedContainerShape(base, tuple(elements))
     else:
         return AtomicShape(base)
-
-
-def _extract_annotation(t: type) -> tuple[type | UnionType, str]:
-    def _extract(t_with_annotation: type) -> str:
-        base, args = get_type_base_args(t_with_annotation)
-        if base is Annotated:
-            return args[1]
-        for arg in args:
-            return _extract(arg)
-        return ""
-
-    to_process = make_dataclass("ToProcess", [("type", t)])
-    t_without = get_type_hints(to_process)["type"]
-    t_with = get_type_hints(to_process, include_extras=True)["type"]
-    annotation = _extract(t_with)
-
-    return t_without, annotation
-
-
-if __name__ == "__main__":
-    from dataclasses import dataclass, field
-
-    # ---------- Leaf-only schema ----------
-    @dataclass
-    class Credentials:
-        username: str
-        password: str | None
-
-    # ---------- Nested schema ----------
-    @dataclass
-    class Address:
-        street: str
-        zip_code: Annotated[int, "postal code"]
-        country: Literal["US", "DE", "FR"]
-
-    # ---------- Main stress-test schema ----------
-    @dataclass
-    class Config:
-        # Optional leaf
-        debug: bool | None
-
-        # Literal
-        mode: Literal["dev", "prod", "test"]
-
-        # Annotated leaf
-        retries: Annotated[int, "number of retries"]
-
-        # Container of containers (max depth = 2)
-        tags: list[list[str]]
-
-        # Optional container
-        flags: set[str] | None
-
-        # Tuple[T, ...] (variadic container)
-        samples: tuple[int, ...]
-
-        # Fixed-size tuple of scalars (mixed types)
-        window: tuple[int, float, Literal["px", "em"]]
-
-        # Dict of scalars
-        headers: dict[str, str]
-
-        # Nested schema
-        address: Address
-
-        # Optional nested schema
-        credentials: Credentials | None
-
-        # Fixed-size tuple of schemas (homogeneous)
-        replicas: tuple[Address, Address, Address]
-
-        # Container of schemas
-        backups: list[Address]
-
-        # Optional container of schemas
-        mirrors: list[Address] | None
-
-        # Dict of scalars with defaults
-        env: dict[str, str] = field(default_factory=dict)
-
-    for k, v in normalize_schema(Config, {}).items():
-        print(k, ":", v)

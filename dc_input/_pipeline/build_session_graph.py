@@ -23,6 +23,9 @@ from dc_input._types import (
 from dc_input._pipeline._utils import is_child_path
 
 
+# ------------------------------------------------------------
+# Main functions
+# ------------------------------------------------------------
 def build_session_graph(sc: NormalizedSchema, base_name: str) -> SessionStart:
     res = _get_base_graph(sc, base_name)
     res = _expand_fixed_schema_containers(res)
@@ -36,8 +39,12 @@ def build_session_graph(sc: NormalizedSchema, base_name: str) -> SessionStart:
     return start
 
 
-def _get_base_graph(sc: NormalizedSchema, base_name: str) -> list[SessionStep]:
-    res_temp: dict[KeyPath, SessionStep] = {(): SessionStart(name=base_name)}
+def _get_base_graph(
+    sc: NormalizedSchema, base_name: str
+) -> list[SessionStart | ContextEntry | InputStep | SessionEnd]:
+    res_temp: dict[KeyPath, SessionStart | ContextEntry | InputStep | SessionEnd] = {
+        (): SessionStart(name=base_name)
+    }
 
     for fld in sc.values():
         parent_path = fld.path[:-1]
@@ -61,9 +68,9 @@ def _get_base_graph(sc: NormalizedSchema, base_name: str) -> list[SessionStep]:
 
 
 def _expand_fixed_schema_containers(
-    steps: list[SessionStep],
-) -> list[SessionStep]:
-    res: list[SessionStep] = []
+    steps: list[SessionStart | ContextEntry | InputStep | SessionEnd],
+) -> list[SessionStart | ContextEntry | InputStep | SessionEnd]:
+    res: list[SessionStart | ContextEntry | InputStep | SessionEnd] = []
 
     i = 0
     while i < len(steps):
@@ -76,6 +83,7 @@ def _expand_fixed_schema_containers(
             i += 1
             continue
 
+        assert isinstance(step_cur, (ContextEntry, InputStep))
         assert isinstance(step_cur.field.shape, FixedSchemaContainerShape)
 
         remaining = steps[i + 1 :]
@@ -110,15 +118,20 @@ def _expand_fixed_schema_containers(
     return res
 
 
-def _add_repeat_exits(steps: list[SessionStep]) -> list[SessionStep]:
+def _add_repeat_exits(
+    steps: list[SessionStart | ContextEntry | InputStep | SessionEnd],
+) -> list[SessionStep]:
     res: list[SessionStep] = []
-    pending: list[tuple[SessionStep, RepeatExit]] = []
+    pending: list[
+        tuple[SessionStart | ContextEntry | InputStep | SessionEnd, RepeatExit]
+    ] = []
 
     for i, step_cur in enumerate(steps):
         if isinstance(step_cur, (SessionStart, SessionEnd)):
             res.append(step_cur)
             continue
 
+        # RepeatExits come right before next non-child; outer contexts have priority over inner contexts
         if isinstance(step_cur, ContextEntry) and isinstance(
             step_cur.field.shape, SchemaContainerShape
         ):
@@ -139,10 +152,6 @@ def _add_repeat_exits(steps: list[SessionStep]) -> list[SessionStep]:
 
 
 def _add_skips(steps: list[SessionStep]) -> list[SessionStep]:
-    # TODO [HIGH]: is_optional (non SchemaContainer) should skip to the step
-    #  after the last descendant InputStep, not directly before the first non-child field:
-    #  these aren't always the same!
-
     res: list[SessionStep] = []
 
     for i, step_cur in enumerate(steps):
@@ -150,16 +159,25 @@ def _add_skips(steps: list[SessionStep]) -> list[SessionStep]:
             res.append(step_cur)
             continue
 
-        remaining = steps[i + 1:]
+        remaining = steps[i + 1 :]
         shape = step_cur.field.shape
         if isinstance(shape, SchemaContainerShape):
+            # Skip target is step directly after matching RepeatExit
             for i_remaining, step in enumerate(remaining):
                 if isinstance(step, RepeatExit) and step.parent is step_cur:
                     skip_target = remaining[i_remaining + 1]
+                    assert isinstance(
+                        skip_target, (ContextEntry, InputStep, SessionEnd, RepeatExit)
+                    )
                     step_cur.skip_target = skip_target
                     break
         elif step_cur.field.is_optional:
-            skip_target = _find_next_non_child(remaining, step_cur)
+            # Skip target is step directly after last descendant of context
+            last_descendant = _find_last_descendant(remaining, step_cur)
+            skip_target = remaining.index(last_descendant) + 1
+            assert isinstance(
+                skip_target, (ContextEntry, InputStep, SessionEnd, RepeatExit)
+            )
             step_cur.skip_target = skip_target
 
         res.append(step_cur)
@@ -172,6 +190,22 @@ def _link_graph(steps: list[SessionStep]) -> None:
         prev.next = cur
         cur.prev = prev
 
+
+# ------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------
+def _find_last_descendant(
+    remaining: list[SessionStep], context: ContextEntry
+) -> InputStep:
+    next_non_child = _find_next_non_child(remaining, context)
+    i_to_check = remaining.index(next_non_child) - 1
+    while True:
+        step = remaining[i_to_check]
+        assert isinstance(step, (ContextEntry, InputStep, RepeatExit))
+        if is_child_path(context.field.path, step.field.path):
+            assert isinstance(step, InputStep)
+            return step
+        i_to_check -= 1
 
 
 def _find_next_non_child(

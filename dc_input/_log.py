@@ -2,12 +2,27 @@ from dataclasses import fields, is_dataclass, asdict
 import logging
 from typing import Any, get_type_hints
 
-from dc_input._types import NormalizedSchema, SessionStart, SessionEnd, KeyPath, SessionResult
+from dc_input._types import NormalizedSchema, SessionStart, KeyPath, SessionResult
 
 logger = logging.getLogger("dc_input")
 
 
-def log_schema(sc: Any) -> None:
+def initialized_schema(sc: Any) -> None:
+    logger.debug("===== INITIALIZED SCHEMA =====")
+
+    sc_dict = asdict(sc)
+    for k, v in sc_dict.items():
+        logger.debug("%s : %r", k, v)
+
+
+def normalized_schema(sc: NormalizedSchema) -> None:
+    logger.debug("===== NORMALIZED SCHEMA =====")
+
+    for path, fld in sc.items():
+        logger.debug("%s : %s", path, fld)
+
+
+def schema(sc: Any) -> None:
     logger.debug("===== SCHEMA =====")
 
     def _log(sc: Any, _path: KeyPath = ()) -> None:
@@ -24,33 +39,18 @@ def log_schema(sc: Any) -> None:
     _log(sc)
 
 
-def log_normalized_schema(sc: NormalizedSchema) -> None:
-    logger.debug("===== NORMALIZED SCHEMA =====")
-
-    for path, fld in sc.items():
-        logger.debug("%s : %s", path, fld)
-
-
-def log_session_graph(start: SessionStart) -> None:
+def session_graph(start: SessionStart) -> None:
     logger.debug("===== SESSION GRAPH =====")
 
     cur = start
     while True:
         logger.debug("%r", cur)
-        if isinstance(cur, SessionEnd):
+        if cur.next is None:
             break
         cur = cur.next
 
 
-def log_session_result(res: SessionResult) -> None:
+def session_result(res: SessionResult) -> None:
     logger.debug("===== SESSION RESULT =====")
     for inpt in res:
         logger.debug("%r", inpt)
-
-
-def log_initialized_schema(sc: Any) -> None:
-    logger.debug("===== INITIALIZED SCHEMA =====")
-
-    sc_dict = asdict(sc)
-    for k, v in sc_dict.items():
-        logger.debug("%s : %r", k, v)

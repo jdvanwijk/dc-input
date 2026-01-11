@@ -123,12 +123,9 @@ class Instrument:
 # Helpers
 # ------------------------------------------------------------
 def parse_date_dmy(s: str) -> datetime.date:
-    s_normalized = s.strip().replace(".", "/").replace("-", "/")
-    date = "/".split(s_normalized)
+    s = s.strip().replace(".", "/").replace("-", "/")
     try:
-        day = int(date[0])
-        month = int(date[1])
-        year = int(date[2])
+        day, month, year = map(int, s.split("/"))
     except Exception:
         raise ValueError("wrong format, must be DD/MM/YYYY")
     else:
@@ -172,91 +169,39 @@ if __name__ == "__main__":
     os.replace(tmp_name, STUDENTS_PATH)
 
     # Done
-    print("\nNew student added:")
+    print(f"\nNew student '{res.name.full}' added to {STUDENTS_PATH.name}:")
     pprint(res)
-    print(f"\nSaved to {STUDENTS_PATH.name}")
 
 ```
 
 ### Interactive Session Example
-```
-# Type '..' to undo previous input
-# Press 'enter' to skip fields marked with ?
+[![asciicast](https://asciinema.org/a/767273.svg)](https://asciinema.org/a/767273)
 
-[music student]
-id <int> : 14231
-
-[name <- music student]
-first : Jakob
-middle? <str, ...> : Ludwig, Felix
-last : Mandelssohn Bartholdy
-
-[music student (contd.)]
-date of birth <date: DD/MM/YYYY> : ..
-
-[name <- music student]
-..last : Mendelssohn Bartholdy
-
-[music student (contd.)]
-date of birth <date: DD/MM/YYYY> : 03/02/1809
-
-[address <- music student]
-# Must be a German address
-street : Jägerstaße
-street number <int> : 51
-apartment? : 
-zip code <int: XXXXX> : 10117
-city : (default: Berlin) 
-
-[primary instrument <- music student]
-name : piano
-start date? <date: DD/MM/YYYY> : 01/01/1816
-comment? : 
-
-# Other instruments the student may have experience with
-> Add secondary instruments to music student? <y/n> : y
-
-[instrument <- secondary instruments]
-name : violin
-start date? <date: DD/MM/YYYY> : 
-comment? : 
-
-> Add another instrument to secondary instruments? <y/n> : y
-name : ukelele
-start date? <date: DD/MM/YYYY> : 
-comment? : student proclaimed 'uke is life', look up what that means
-
-> Add another instrument to secondary instruments? <y/n> : n
-
-[music student (contd.)]
-comments? : seems v. talented
-
-> Finish? <y/n> : y
-```
 
 ### Final Result
 ```
-MusicStudent(id=14231,
+New student 'Jakob Ludwig Felix Mendelssohn Bartholdy' added to students.json:
+MusicStudent(id=14321,
              name=Name(first='Jakob',
                        middle=['Ludwig', 'Felix'],
                        last='Mendelssohn Bartholdy',
                        full='Jakob Ludwig Felix Mendelssohn Bartholdy'),
              date_of_birth=datetime.date(1809, 2, 3),
-             address=Address(street='Jägerstaße',
+             address=Address(street='Jägerstraße',
                              street_number=51,
                              apartment=None,
                              zip_code=10117,
                              city='Berlin'),
              primary_instrument=Instrument(name='piano',
-                                           start_date=datetime.date(1816, 1, 1),
+                                           start_date=datetime.date(1816, 4, 30),
                                            comment=None),
              secondary_instruments=[Instrument(name='violin',
                                                start_date=None,
                                                comment=None),
-                                    Instrument(name='ukelele',
+                                    Instrument(name='ukulele',
                                                start_date=None,
                                                comment='student proclaimed '
-                                                       "'uke is life', look up "
+                                                       '"uke is life", find out '
                                                        'what that means')],
              comments='seems v. talented')
 ```

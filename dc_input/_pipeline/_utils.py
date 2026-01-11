@@ -3,10 +3,6 @@ from __future__ import annotations
 from dataclasses import is_dataclass
 from types import UnionType, NoneType
 from typing import (
-    Mapping,
-    MutableMapping,
-    Iterable,
-    TypeVar,
     Any,
     get_origin,
     get_args,
@@ -14,24 +10,7 @@ from typing import (
     Annotated,
 )
 
-from _types import KeyPath
-
-T = TypeVar("T")
-U = TypeVar("U")
-
-
-def get_type_base_args(t: Any) -> tuple[Any, tuple[Any, ...]]:
-    """
-    Normalize typing constructs to (base, args).
-    - For typing origins, return (origin, args)
-    - For bare classes, return (class, ())
-    """
-    origin = get_origin(t)
-    if origin is not None:
-        args = get_args(t)
-        return origin, args
-    else:
-        return t, ()
+from dc_input._types import KeyPath
 
 
 def alt_issubclass(
@@ -91,6 +70,20 @@ def get_optional_non_none(t: type | UnionType) -> type:
     non_none = [a for a in args if a not in (NoneType, None)]
 
     return non_none[0]
+
+
+def get_type_base_args(t: Any) -> tuple[Any, tuple[Any, ...]]:
+    """
+    Normalize typing constructs to (base, args).
+    - For typing origins, return (origin, args)
+    - For bare classes, return (class, ())
+    """
+    origin = get_origin(t)
+    if origin is not None:
+        args = get_args(t)
+        return origin, args
+    else:
+        return t, ()
 
 
 def is_child_path(parent: KeyPath, child: KeyPath) -> bool:

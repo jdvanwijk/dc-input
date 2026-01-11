@@ -11,7 +11,7 @@ def _parse_bool(s: str) -> bool:
     yes = ("y", "yes", "1", "t", "true")
     no = ("n", "no", "0", "f", "false")
     if s not in yes + no:
-        raise ValueError(f"must be in {yes} for 'True' or {no} for 'False'")
+        raise ValueError(f"must be 'y' or 'n'")
     return s in yes
 
 
@@ -47,7 +47,7 @@ def _get_primitive_parsers() -> ParserRegistry:
 # ------------------------------------------------------------
 # Main function
 # ------------------------------------------------------------
-def merge_parsers(parsers_to_add: ParserRegistry) -> ParserRegistry:
+def prepare_parsers(parsers_to_add: ParserRegistry) -> ParserRegistry:
     """
     Merge a registry of user provided parsers with the parsers provided by the library.
     Library parsers have priority.

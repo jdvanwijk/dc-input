@@ -2,16 +2,9 @@ from __future__ import annotations
 
 from typing import TypeVar
 
-from dc_input._debug import log_normalized_schema, log_session_graph, log_schema, log_session_result, \
-    log_initialized_schema
-from dc_input._pipeline import (
-    build_session_graph,
-    initialize_schema,
-    normalize_schema,
-    merge_parsers,
-    run_user_session,
-    validate_user_definitions,
-)
+import dc_input._log as log
+import dc_input._pipeline as pipeline
+
 from dc_input._types import ContainerAliasRegistry, ParserRegistry
 
 
@@ -53,8 +46,9 @@ def get_input(
         - The only supported ``Union`` is ``T | None``.
         - ``list``, ``set`` and ``tuple`` may only nest one level
           (a nested schema counts as one level).
+        - ``list``, ``set`` and ``tuple`` may not nest ``dict``.
         - ``dict`` values may not be containers or schemas.
-        - Fixed-size ``tuple`` schemas must be homogeneous.
+        - Fixed-size ``tuple`` with schemas must be homogeneous.
 
     container_aliases : ContainerAliasRegistry | None, optional
         Mapping that allows registering container-like classes that are not
@@ -123,24 +117,24 @@ def get_input(
             SpecificContainerLike: list[int],
         }
     """
-    log_schema(schema)
-
     container_aliases = container_aliases or {}
     parsers = parsers or {}
-    validate_user_definitions(schema, container_aliases, parsers)
 
-    parsers_merged = merge_parsers(parsers)
+    log.schema(schema)
+    pipeline.validate_user_definitions(schema, container_aliases, parsers)
 
-    normalized_schema = normalize_schema(schema, container_aliases)
-    log_normalized_schema(normalized_schema)
+    parsers = pipeline.prepare_parsers(parsers)
 
-    session_graph = build_session_graph(normalized_schema, schema.__name__)
-    log_session_graph(session_graph)
+    normalized_schema = pipeline.normalize_schema(schema, container_aliases)
+    log.normalized_schema(normalized_schema)
 
-    session_result = run_user_session(session_graph, parsers_merged)
-    log_session_result(session_result)
+    session_graph = pipeline.build_session_graph(normalized_schema, schema.__name__)
+    log.session_graph(session_graph)
 
-    initialized = initialize_schema(schema, session_result)
-    log_initialized_schema(initialized)
+    session_result = pipeline.run_user_session(session_graph, parsers)
+    log.session_result(session_result)
+
+    initialized = pipeline.initialize_schema(schema, session_result)
+    log.initialized_schema(initialized)
 
     return initialized
