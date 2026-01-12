@@ -54,13 +54,13 @@ This is representative of how `dc-input` can be used in real projects.
 ```python
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 import datetime
 import json
 import os
 from pathlib import Path
 from pprint import pprint
-import tempfile
+from tempfile import NamedTemporaryFile
 from typing import Annotated, Any
 
 from dc_input import get_input
@@ -95,7 +95,7 @@ class Name:
 
     full: str = field(init=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         middle = f" {' '.join(name for name in self.middle)} " if self.middle else " "
         self.full = f"{self.first}{middle}{self.last}"
 
@@ -129,7 +129,7 @@ def parse_date_dmy(s: str) -> datetime.date:
         return datetime.date(year, month, day)
 
 
-def json_default(obj: Any) -> Any:
+def json_default(obj: object) -> Any:
     if isinstance(obj, datetime.date):
         return obj.isoformat()
     raise TypeError(f"Type not serializable: {type(obj)}")
@@ -139,35 +139,26 @@ def json_default(obj: Any) -> Any:
 # Main function
 # ------------------------------------------------------------
 if __name__ == "__main__":
-    # Get input
-    parsers = {
-        datetime.date: parse_date_dmy,
-    }
-    res = get_input(MusicStudent, parsers=parsers)
-    res_dict = asdict(res)  # dataclasses → JSON-serializable dict
+    result = get_input(MusicStudent, parsers={datetime.date: parse_date_dmy})
 
-    # Deserialize student registry
-    data: dict[str, list] = {"students": []}
+    # Deserialize student registry and add session result
+    data = {"students": []}
     if STUDENTS_PATH.exists():
         with open(STUDENTS_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-
-    # Add session result to deserialized registry
-    data.setdefault("students", [])
-    data["students"].append(res_dict)
+    data["students"].append(asdict(result))
 
     # Serialize registry back to JSON and overwrite old file
-    with tempfile.NamedTemporaryFile(
+    with NamedTemporaryFile(
             "w", encoding="utf-8", delete=False, dir=STUDENTS_PATH.parent
     ) as tmp:
         json.dump(data, tmp, indent=2, default=json_default)
         tmp_name = tmp.name
-
     os.replace(tmp_name, STUDENTS_PATH)
 
     # Done
-    print(f"\nNew student '{res.name.full}' added to {STUDENTS_PATH.name}:")
-    pprint(res)
+    print(f"\nNew student '{result.name.full}' added to {STUDENTS_PATH.name}:")
+    pprint(result)
 
 ```
 
