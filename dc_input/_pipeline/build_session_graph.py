@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import cast
 
 from dc_input._types import (
     ContextEntry,
@@ -67,52 +68,89 @@ def _get_base_graph(
     return list(res_temp.values()) + [SessionEnd()]
 
 
+
 def _expand_fixed_schema_containers(
     steps: list[SessionStart | ContextEntry | InputStep | SessionEnd],
 ) -> list[SessionStart | ContextEntry | InputStep | SessionEnd]:
-    res: list[SessionStart | ContextEntry | InputStep | SessionEnd] = []
+    """
+    Expand FixedSchemaContainerShape contexts (e.g. tuple[T, T]) into N repeated
+    context traversals.
 
+    Critical invariant: cloned InputSteps/ContextEntries must have their `.parent`
+    pointing to the cloned parent, not the original one. Otherwise initialization
+    cannot group inputs by context_path/iteration correctly.
+    """
+    res: list[SessionStart | ContextEntry | InputStep | SessionEnd] = []
     i = 0
+
     while i < len(steps):
         step_cur = steps[i]
-        if isinstance(step_cur, (SessionStart, SessionEnd)) or (
-            isinstance(step_cur, (ContextEntry, InputStep))
-            and not isinstance(step_cur.field.shape, FixedSchemaContainerShape)
+
+        # Keep non-fixed-schema-container steps as-is
+        if (
+            isinstance(step_cur, (SessionStart, SessionEnd))
+            or not isinstance(step_cur, ContextEntry)
+            or not isinstance(step_cur.field.shape, FixedSchemaContainerShape)
         ):
             res.append(step_cur)
             i += 1
             continue
 
-        assert isinstance(step_cur, (ContextEntry, InputStep))
-        assert isinstance(step_cur.field.shape, FixedSchemaContainerShape)
+        # step_cur is the fixed schema container ContextEntry
+        shape = cast(FixedSchemaContainerShape, step_cur.field.shape)
 
+        # Collect its contiguous descendant subgraph (ContextEntry/InputStep only)
         remaining = steps[i + 1 :]
-        subgraph = [
+        subgraph: list[ContextEntry | InputStep] = [
             step
             for step in remaining
             if isinstance(step, (ContextEntry, InputStep))
             and is_child_path(step_cur.field.path, step.field.path)
         ]
-        to_repeat = [step_cur] + subgraph
-        n_repeats = step_cur.field.shape.length
 
+        to_repeat: list[ContextEntry | InputStep] = [step_cur] + subgraph
+        n_repeats = shape.length
+
+        # Repeat N times: clone the whole subtree, remapping parent pointers
         for n in range(n_repeats):
+            # We avoid hashing steps by using id(orig_step) -> clone_step
+            clone_by_id: dict[int, ContextEntry | InputStep] = {}
+            originals: list[ContextEntry | InputStep] = []
+            clones: list[ContextEntry | InputStep] = []
+
+            # 1) Clone nodes (parents rebound in pass 2)
             for step in to_repeat:
                 if isinstance(step, InputStep):
-                    step_clone = InputStep(field=step.field, parent=step.parent)
+                    clone: ContextEntry | InputStep = InputStep(field=step.field, parent=None)  # type: ignore[arg-type]
                 else:
-                    # Tuple[T, T] | None is only optional for the first T
+                    fld = step.field
+                    # Tuple[T, T] | None is only optional for the first element
                     if step is step_cur and n > 0:
-                        field_replace = replace(step.field, is_optional=False)
-                        step_clone = ContextEntry(field_replace, parent=step.parent)
-                    else:
-                        step_clone = ContextEntry(field=step.field, parent=step.parent)
+                        fld = replace(fld, is_optional=False)
+
+                    clone = ContextEntry(field=fld, parent=None)  # type: ignore[arg-type]
 
                     if step is step_cur:
-                        step_clone.position_info = PositionInfo(n + 1, n_repeats)
+                        clone.position_info = PositionInfo(n + 1, n_repeats)
 
-                res.append(step_clone)
+                originals.append(step)
+                clones.append(clone)
+                clone_by_id[id(step)] = clone
 
+            # 2) Rebind parents (if parent is in subtree, point to cloned parent)
+            for orig, clone in zip(originals, clones):
+                orig_parent = orig.parent
+                if orig_parent is None:
+                    clone.parent = None
+                elif id(orig_parent) in clone_by_id:
+                    clone.parent = clone_by_id[id(orig_parent)]  # type: ignore[assignment]
+                else:
+                    clone.parent = orig_parent  # type: ignore[assignment]
+
+            # 3) Append clones in preorder
+            res.extend(cast(list[SessionStart | ContextEntry | InputStep | SessionEnd], clones))
+
+        # Skip past the original subtree in the input list
         i += len(to_repeat)
 
     return res
