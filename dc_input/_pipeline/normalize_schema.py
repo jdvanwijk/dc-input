@@ -4,7 +4,7 @@ from dataclasses import fields, is_dataclass, make_dataclass
 from types import UnionType
 from typing import Any, get_type_hints, Literal, Annotated
 
-from .._types import (
+from dc_input._types import (
     NormalizedSchema,
     ContainerAliasRegistry,
     KeyPath,

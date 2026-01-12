@@ -13,7 +13,7 @@ from typing import (
     Optional,
 )
 
-from .._types import ContainerAliasRegistry, ParserRegistry
+from dc_input._types import ContainerAliasRegistry, ParserRegistry
 from dc_input._pipeline._utils import (
     alt_issubclass,
     get_type_base_args,

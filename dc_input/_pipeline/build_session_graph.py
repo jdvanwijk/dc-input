@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from math import remainder
 from typing import cast
 
 from dc_input._types import (

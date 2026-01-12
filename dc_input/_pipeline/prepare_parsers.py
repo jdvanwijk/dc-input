@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .._types import ParserRegistry
+from dc_input._types import ParserRegistry
 
 
 # ------------------------------------------------------------
