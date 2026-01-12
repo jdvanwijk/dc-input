@@ -348,7 +348,7 @@ def _format_input_type_hint(shape: InputShape) -> str:
 
     elif isinstance(shape, DictShape):
         dict_args = [
-            "str" if arg is Any else arg.__name__ for arg in (shape.key, shape.value)
+            "str" if arg is Any else arg.name for arg in (shape.key, shape.value)
         ]
         return f"({', '.join(dict_args)}), ..."
 
