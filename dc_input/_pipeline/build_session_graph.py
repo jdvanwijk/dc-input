@@ -175,7 +175,7 @@ def _add_repeat_exits(
         ):
             rxt = RepeatExit(parent=step_cur, element_start=steps[i + 1])
             remaining = steps[i + 1 :]
-            next_non_child = _find_next_non_child(remaining, step_cur)
+            next_non_child = _next_input_or_context_outside_cur(remaining, step_cur)
             pending.insert(0, (next_non_child, rxt))
 
         for pair in pending[:]:
@@ -234,8 +234,8 @@ def _link_graph(steps: list[SessionStep]) -> None:
 def _find_last_descendant(
     remaining: list[SessionStep], context: ContextEntry
 ) -> InputStep:
-    next_non_child = _find_next_non_child(remaining, context)
-    i_to_check = remaining.index(next_non_child) - 1
+    next_outside_cur = _next_input_or_context_outside_cur(remaining, context)
+    i_to_check = remaining.index(next_outside_cur) - 1
     while True:
         step = remaining[i_to_check]
         assert isinstance(step, (ContextEntry, InputStep, RepeatExit))
@@ -245,7 +245,7 @@ def _find_last_descendant(
         i_to_check -= 1
 
 
-def _find_next_non_child(
+def _next_input_or_context_outside_cur(
     remaining: list[SessionStep], context: ContextEntry
 ) -> InputStep | ContextEntry | SessionEnd:
     return next(
@@ -254,6 +254,6 @@ def _find_next_non_child(
         if isinstance(step, SessionEnd)
         or (
             isinstance(step, (InputStep, ContextEntry))
-            and not is_child_path(context.field.path, step.field.path)
+        and not context.field.path == step.field.path[:len(context.field.path)]
         )
     )
