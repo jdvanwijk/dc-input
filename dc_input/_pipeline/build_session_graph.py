@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from math import remainder
 from typing import cast
 
 from dc_input._types import (
@@ -212,7 +213,9 @@ def _add_skips(steps: list[SessionStep]) -> list[SessionStep]:
         elif step_cur.field.is_optional:
             # Skip target is step directly after last descendant of context
             last_descendant = _find_last_descendant(remaining, step_cur)
-            skip_target = remaining.index(last_descendant) + 1
+            skip_target_i = remaining.index(last_descendant) + 1
+            skip_target = remaining[skip_target_i]
+            assert isinstance(skip_target, (ContextEntry, InputStep, RepeatExit, SessionEnd))
             step_cur.skip_target = skip_target
 
         res.append(step_cur)
