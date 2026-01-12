@@ -81,8 +81,11 @@ def normalize_schema(
         # shape_type: field_type or alias type (alias type has priority)
         base_shape, args_shape = get_type_base_args(field_type)
         if alias := container_aliases.get(base_shape):
-            base_shape, args_shape = get_type_base_args(alias)
-
+            alias_base, alias_args = get_type_base_args(alias)
+            base_shape = alias_base
+            # Alias is specific if alias_args (e.g. list[int]), else treat as generic
+            if alias_args:
+                args_shape = alias_args
         shape = _get_shape(base_shape, args_shape)
 
         _res[path_cur] = NormalizedField(
