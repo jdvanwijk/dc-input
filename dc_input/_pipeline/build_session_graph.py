@@ -175,9 +175,6 @@ def _add_skips(steps: list[SessionStep]) -> list[SessionStep]:
             # Skip target is step directly after last descendant of context
             last_descendant = _find_last_descendant(remaining, step_cur)
             skip_target = remaining.index(last_descendant) + 1
-            assert isinstance(
-                skip_target, (ContextEntry, InputStep, SessionEnd, RepeatExit)
-            )
             step_cur.skip_target = skip_target
 
         res.append(step_cur)
