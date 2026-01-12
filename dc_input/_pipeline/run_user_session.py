@@ -223,7 +223,7 @@ def _handle_undo(
     input_to_undo = res.pop()
     step_undo = input_to_undo.input_step
     # If isinstance(step_undo.next, RepeatExit), we cross a repeat boundary of a SchemaContainer
-    if step_undo.parent != step_cur.parent or isinstance(step_undo.next, RepeatExit):
+    if isinstance(step_cur, SessionEnd) or step_undo.parent != step_cur.parent or isinstance(step_undo.next, RepeatExit):
         to_format = (
             step_cur.element_start
             if isinstance(step_cur, RepeatExit)
