@@ -316,11 +316,16 @@ def _format_input_step(step: InputStep) -> str:
 
     input_hint_fmt = f" <{': '.join(input_hint)}>" if input_hint else ""
 
-    v_def_fmt = (
-        ""
-        if fld.default in (MISSING, None)
-        else f"{GREY}(default: {fld.default}){RESET} "
-    )
+    v_def_fmt = ""
+    if (fld.default and fld.default is not MISSING) or fld.default in (False, 0):
+        if fld.default is True:
+            default = "y"
+        elif fld.default is False:
+            default = "n"
+        else:
+            default = fld.default
+        v_def_fmt = f"{GREY}(default: {default}){RESET} "
+
 
     return f"{name_fmt}{input_hint_fmt} : {v_def_fmt}"
 
