@@ -1,4 +1,4 @@
-from dataclasses import is_dataclass, fields
+from dataclasses import is_dataclass, fields, dataclass
 from types import NoneType, UnionType
 from typing import (
     Annotated,
@@ -13,7 +13,7 @@ from typing import (
     Optional,
 )
 
-from dc_input._types import ContainerAliasRegistry, ParserRegistry
+from dc_input._types import ContainerAliasRegistry, ParserRegistry, KeyPath
 from dc_input._pipeline._utils import (
     alt_issubclass,
     get_type_base_args,
@@ -32,6 +32,40 @@ def validate_user_definitions(
 
     All detected issues are aggregated and raised as a single ValueError
     to provide a comprehensive error report to the user.
+
+    Examples
+    --------
+    **Bad schema**::
+
+        @dataclass
+        class Inner:
+            arg: str
+
+        @dataclass
+        class EmptySchema:
+            pass
+
+        class NotDataclass:
+            pass
+
+        @dataclass
+        class BadSchema:
+            not_dataclass: NotDataclass
+            empty: EmptySchema
+            none: None
+            nested_annotation: list[Annotated[str, "hello"]]
+            nested_union: list[str | None]
+            ambiguous_union: str | int
+            also_ambiguous: str | int | None
+            dict_with_schema: dict[str, Inner]
+            dict_with_dict: dict[int, dict]
+            dict_with_container: dict[str, list]
+            too_deep: list[list[list[str]]]
+            also_too_deep: list[list[Inner]]
+            container_with_dict: list[dict[str, int]]
+            not_hashable: set[Inner]
+            not_homogenuous: tuple[str, Inner]
+            not_enough_schemas: tuple[Inner]
     """
     # Collect errors
     all_errors = {
@@ -66,7 +100,6 @@ def _get_container_registry_errors(registry: ContainerAliasRegistry) -> list[str
     - Values can't be None
     - Unions:
         * only T | None unions are allowed (other Unions are ambiguous when parsing)
-        * use of typing.Optional is not allowed (considered deprecated, and adds parsing complexity)
         * nested unions are not allowed (example: list[T | None])
     - Dicts:
         * may not contain nested schemas
@@ -94,20 +127,20 @@ def _get_container_registry_errors(registry: ContainerAliasRegistry) -> list[str
 
         if not isinstance(container_t, type):
             errors.append(
-                f"Registry keys must be concrete types [key: '{container_t}']"
+                f"Registry keys must be concrete types [key: '{type(container_t).__name__}']"
             )
             continue
 
         if not isinstance(alias_base, type):
             errors.append(
-                f"Registry values must be concrete types or parameterized types [key: '{container_t}', value: '{alias_t}']"
+                f"Registry values must be concrete types or parameterized types [key: '{container_t.__name__}', value: '{alias_t}']"
             )
             continue
 
         _, container_t_args = get_type_base_args(container_t)
         if container_t_args:
             errors.append(
-                f"Parameterized registry keys are not allowed [key: '{container_t.__name__}']"
+                f"Parameterized registry keys are not allowed [key: '{container_t}]"
             )
 
         if not alt_issubclass(alias_base, (dict, list, set, tuple)):
@@ -169,7 +202,7 @@ def _get_parser_registry_errors(registry: ParserRegistry) -> list[str]:
 
     for t, parser in registry.items():
         if not isinstance(t, type):
-            errors.append(f"Registry keys must be concrete types [key: '{t.__name__}'")
+            errors.append(f"Registry keys must be concrete types [key: '{type(t).__name__}']")
             continue
 
         if not callable(parser):
@@ -196,7 +229,6 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
         * nested Annotations not allowed (example: list[Annotated[T]])
     - Unions:
         * only T | None unions are allowed (other Unions are ambiguous when parsing)
-        * use of typing.Optional is not allowed (considered deprecated, and adds parsing complexity)
         * nested unions are not allowed (example: list[T | None])
     - Dicts:
         * may not contain nested schemas
@@ -210,9 +242,10 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
         * must be homogenuous
         * must contain at least two schemas (user should use T instead of tuple[T])
     """
-    if not _errors:
+    if _errors is None:
         _errors = []
 
+    # TODO [LOW]: The two checks below do not catch errors in inner schemas
     if not is_dataclass(sc):
         _errors.append(f"Schema must be a dataclass [schema: {sc.__name__}]")
     elif not fields(sc):
@@ -220,6 +253,9 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
 
     for name, t in get_type_hints(sc, include_extras=True).items():
         base, args = get_type_base_args(t)
+
+        if t is NoneType:
+            _errors.append(f"Type can't be NoneType [schema: {sc.__name__}, field: '{name}']")
 
         if args:
             for arg in args:
@@ -256,15 +292,12 @@ def _get_type_errors(t: type) -> list[str]:
         return errors
 
     # Reject None
-    if t in (None, NoneType):
-        errors.append(f"Can't be None")
+    if t is NoneType:
+        errors.append(f"Type can't be NoneType")
         return errors
 
     # UnionType
-    if base is Optional:
-        errors.append(f"Optional[T] is deprecated; use T | None instead")
-
-    if _has_nested_union_type(t):
+    if _has_union_in_args(t):
         errors.append(f"Nested UnionTypes are not allowed")
         return errors
 
@@ -278,6 +311,7 @@ def _get_type_errors(t: type) -> list[str]:
         non_none = [a for a in args if a is not NoneType]
         if len(non_none) != 1:
             errors.append(f"T | None must contain exactly one non-None type")
+            return errors
 
     # list, set, tuple[T, ...]
     if alt_issubclass(t, (list, set, tuple)):
@@ -363,21 +397,52 @@ def _max_container_depth(t: Any) -> int:
     return 0
 
 
-def _has_nested_union_type(t: type | UnionType) -> bool:
-    def _has_nested(t: type | UnionType) -> bool:
-        base, args = get_type_base_args(t)
-        if base in (Union, UnionType, Optional):
+def _has_union_in_args(t: type | UnionType) -> bool:
+    def _has_nested_union(x) -> bool:
+        base, args = get_type_base_args(x)
+        if base in (Union, UnionType):
             return True
-        for arg in args:
-            return _has_nested(arg)
-        return False
+        return any(_has_nested_union(a) for a in args)
 
     _, args = get_type_base_args(t)
-    if args:
-        for arg in args:
-            return _has_nested(arg)
-
-    return False
+    return any(_has_nested_union(a) for a in args)
 
 
-# TODO [LOW]: add a WrongSchema example for documentation
+if __name__ == "__main__":
+    @dataclass
+    class Inner:
+        arg: str
+
+
+    @dataclass
+    class EmptySchema:
+        pass
+
+
+    class NotDataclass:
+        pass
+
+
+    @dataclass
+    class BadSchema:
+        not_dataclass: NotDataclass
+        empty: EmptySchema
+        none: None
+        nested_annotation: list[Annotated[str, "hello"]]
+        deprecated: Optional[str]
+        nested_union: list[str | None]
+        ambiguous_union: str | int
+        also_ambiguous: str | int | None
+        dict_with_schema: dict[str, Inner]
+        dict_with_dict: dict[int, dict]
+        dict_with_container: dict[str, list]
+        too_deep: list[list[list[str]]]
+        also_too_deep: list[list[Inner]]
+        container_with_dict: list[dict[str, int]]
+        not_hashable: set[Inner]
+        not_homogenuous: tuple[str, Inner]
+        not_enough_schemas: tuple[Inner]
+
+    validate_user_definitions(BadSchema, {}, {})
+
+    # TODO [LOW]: add bad parser registry and bad container aliases registry examples
