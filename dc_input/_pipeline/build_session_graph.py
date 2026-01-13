@@ -165,7 +165,7 @@ def _add_repeat_exits(
     ] = []
 
     for i, step_cur in enumerate(steps):
-        if isinstance(step_cur, (SessionStart, SessionEnd)):
+        if isinstance(step_cur, SessionStart):
             res.append(step_cur)
             continue
 
