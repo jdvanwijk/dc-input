@@ -3,6 +3,7 @@ import logging
 from typing import Any, get_type_hints
 
 from dc_input._types import NormalizedSchema, SessionStart, KeyPath, SessionResult
+from dc_input._version import VERSION
 
 logger = logging.getLogger("dc_input")
 
@@ -54,3 +55,7 @@ def session_result(res: SessionResult) -> None:
     logger.debug("===== SESSION RESULT =====")
     for inpt in res:
         logger.debug("%r", inpt)
+
+
+def version() -> None:
+    logger.debug("VERSION: %s", VERSION)

@@ -117,6 +117,8 @@ def get_input(
             SpecificContainerLike: list[int],
         }
     """
+    log.version()
+
     container_aliases = container_aliases or {}
     parsers = parsers or {}
 
