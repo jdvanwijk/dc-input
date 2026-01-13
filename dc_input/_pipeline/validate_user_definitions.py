@@ -41,17 +41,9 @@ def validate_user_definitions(
         class Inner:
             arg: str
 
-        @dataclass
-        class EmptySchema:
-            pass
-
-        class NotDataclass:
-            pass
 
         @dataclass
         class BadSchema:
-            not_dataclass: NotDataclass
-            empty: EmptySchema
             none: None
             nested_annotation: list[Annotated[str, "hello"]]
             nested_union: list[str | None]
@@ -224,7 +216,6 @@ def _get_schema_errors(sc: Any, _errors: list[str] | None = None) -> list[str]:
     Enforced rules:
     - Schema:
         * must be a dataclass
-        * must have at least one field
         * field type can't be None
         * nested Annotations not allowed (example: list[Annotated[T]])
     - Unions:

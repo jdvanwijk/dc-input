@@ -3,23 +3,44 @@
 [![PyPI](https://img.shields.io/pypi/v/dc-input.svg)](https://pypi.org/project/dc-input/)
 [![License](https://img.shields.io/github/license/jdvanwijk/dc-input.svg)](LICENSE)
 
-**Interactively fill dataclass instances via the command line.** 
-Features include nested schemas, repeatable containers, undo support, defaults, optional fields, and custom parsers.
+**Turn dataclass schemas into robust interactive input sessions, without handwritten prompt logic.** Features include nested schemas, repeatable containers, undo support, defaults, optional fields, and custom parsers.
 Useful for quick data entry, prototyping, or structured configuration; integrates easily with your own CLI tools.
 
 ---
 
 ## Why dc-input?
 If you’ve ever written a script that prompts for input, validates values, and parses the result, you’ve probably 
-noticed how boilerplate-y and bug-prone this can be.
+noticed how boilerplate-heavy and bug-prone this can be:
+```python
+from dataclasses import dataclass
 
-`dc-input` replaces all that *with a single function call*.
+@dataclass
+class User:
+    name: str
+    age: int | None
 
-## Installation
-```bash
-pip install dc-input
+
+while True:
+    name = input("Name: ").strip()
+    if name:
+        break
+    print("Name is required")
+
+while True:
+    age_raw = input("Age (optional): ").strip()
+    if not age_raw:
+        age = None
+        break
+    try:
+        age = int(age_raw)
+        break
+    except ValueError:
+        print("Age must be an integer")
+
+user = User(name=name, age=age)
 ```
-## Quick Start
+
+`dc-input` replaces all of that *with a single function call*:
 ```python
 from dataclasses import dataclass
 from dc_input import get_input
@@ -30,8 +51,13 @@ class User:
     age: int | None
 
 user = get_input(User)
-print(user)
 ```
+
+## Installation
+```bash
+pip install dc-input
+```
+
 
 ## Usage
 Define your dataclasses as usual, then call `get_input()` to interactively collect values. 
@@ -41,7 +67,7 @@ and validation automatically. At any prompt, type `..` to undo the previous inpu
 
 ## Complete Example
 
-Below is a full, self-contained script that:
+How about a more involved example? Below is a full, self-contained script that:
 
 - interactively collects data for a new music student
 - validates and parses input
@@ -52,7 +78,6 @@ This is representative of how `dc-input` can be used in real projects.
 ### Script
 
 ```python
-from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 import datetime
@@ -71,22 +96,6 @@ STUDENTS_PATH = Path("students.json")
 # ------------------------------------------------------------
 # Schema
 # ------------------------------------------------------------
-@dataclass
-class MusicStudent:
-    id: int
-
-    name: Name
-    date_of_birth: Annotated[datetime.date, "DD/MM/YYYY"]
-    address: Annotated[Address, "Must be a German address"]
-
-    primary_instrument: Instrument
-    secondary_instruments: Annotated[
-        list[Instrument], "Other instruments the student may have experience with"
-    ]
-
-    comments: str | None
-
-
 @dataclass
 class Name:
     first: str
@@ -114,6 +123,22 @@ class Instrument:
     name: str
     start_date: Annotated[datetime.date | None, "DD/MM/YYYY"]
     comment: str | None
+
+
+@dataclass
+class MusicStudent:
+    id: int
+
+    name: Name
+    date_of_birth: Annotated[datetime.date, "DD/MM/YYYY"]
+    address: Annotated[Address, "Must be a German address"]
+
+    primary_instrument: Instrument
+    secondary_instruments: Annotated[
+        list[Instrument], "Other instruments the student may have experience with"
+    ]
+
+    comments: str | None
 
 
 # ------------------------------------------------------------
@@ -194,12 +219,19 @@ MusicStudent(id=14321,
              comments='seems v. talented')
 ```
 
+## Comparison
+
+Command line parsing libraries like `argparse` and `typer` fill a somewhat different niche: dc-input is more focused on interactive, form-like input rather than CLI args.
+
+Compared to prompt libraries like `prompt_toolkit` and `questionary`, `dc-input` is higher-level: you don’t design prompts or control flow by hand — the structure of your data *is* the control flow. This makes dc-input more opinionated and less flexible than those examples, so it won’t fit every workflow; but in return you get very fast setup, strong guarantees about correctness, and excellent support for traversing nested data-structures. 
+
 ## Roadmap
-- Extensive testing (help welcome, see below!)
-- Adapter for `attrs`
-- Adapters for `pydantic` and `sqlalchemy` (if feasible) 
-- Translations
-- User-customizable UX
+- [ ] More extensive testing (want to help out? look below!)
+- [ ] `attrs` adapter
+- [ ] `pydantic` adapter (if feasible)
+- [ ] `sqlalchemy` adapter (if feasible)
+- [ ] Translations
+- [ ] User-customizable UX (themes/prompts/hooks)
 
 
 ## Contributions
