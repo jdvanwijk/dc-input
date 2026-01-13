@@ -61,7 +61,7 @@ def get_optional_non_none(t: type | UnionType) -> type:
     if base is Annotated:
         base, args = get_type_base_args(args[0])
 
-    if base is not UnionType:
+    if base not in (Union, UnionType):
         return t
 
     if len(args) != 2 or NoneType not in args:

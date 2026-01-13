@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import fields, is_dataclass, make_dataclass
 from types import UnionType
-from typing import Any, get_type_hints, Literal, Annotated
+from typing import Any, get_type_hints, Literal, Annotated, Union
 
 from dc_input._types import (
     NormalizedSchema,
@@ -69,11 +69,11 @@ def normalize_schema(
         t_no_annotation, annotation = _extract_annotation(t)
         base_no_annotation, _ = get_type_base_args(t_no_annotation)
 
-        # Assume UnionType is T | None
-        is_optional = base_no_annotation is UnionType
+        # Assume UnionType is T | None or Optional[T]
+        is_optional = base_no_annotation in (Union, UnionType)
 
         # field_type: original type without annotation and UnionType
-        if base_no_annotation is UnionType:
+        if base_no_annotation in (Union, UnionType):
             field_type = get_optional_non_none(t_no_annotation)
         else:
             field_type = t_no_annotation
