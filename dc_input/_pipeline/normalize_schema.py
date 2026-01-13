@@ -69,7 +69,7 @@ def normalize_schema(
         t_no_annotation, annotation = _extract_annotation(t)
         base_no_annotation, _ = get_type_base_args(t_no_annotation)
 
-        # Assume UnionType is T | None or Optional[T]
+        # Assume UnionType is T | None
         is_optional = base_no_annotation in (Union, UnionType)
 
         # field_type: original type without annotation and UnionType
@@ -151,10 +151,6 @@ def _get_shape(base: type, args: tuple[Any, ...]) -> ContextShape | InputShape:
         else:
             # Assume max depth == 2
             element = _get_shape(base_inner, args_inner)
-            assert isinstance(
-                element,
-                (AtomicShape, ContainerShape, FixedContainerShape, LiteralShape),
-            )
             return ContainerShape(base, element)
     elif alt_issubclass(base, tuple):
         # FixedContainerShape / FixedSchemaContainerShape
@@ -168,18 +164,6 @@ def _get_shape(base: type, args: tuple[Any, ...]) -> ContextShape | InputShape:
                 # Assume max depth == 2
                 base_inner, args_inner = get_type_base_args(arg)
                 elements.append(_get_shape(base_inner, args_inner))
-                assert all(
-                    isinstance(
-                        el,
-                        (
-                            AtomicShape,
-                            ContainerShape,
-                            FixedContainerShape,
-                            LiteralShape,
-                        ),
-                    )
-                    for el in elements
-                )
             return FixedContainerShape(base, tuple(elements))
     else:
         return AtomicShape(base)

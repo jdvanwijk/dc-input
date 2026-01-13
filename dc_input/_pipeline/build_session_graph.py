@@ -41,7 +41,7 @@ def build_session_graph(sc: NormalizedSchema, base_name: str) -> SessionStart:
 
 
 def _get_base_graph(
-    sc: NormalizedSchema, base_name: str
+        sc: NormalizedSchema, base_name: str
 ) -> list[SessionStart | ContextEntry | InputStep | SessionEnd]:
     res_temp: dict[KeyPath, SessionStart | ContextEntry | InputStep | SessionEnd] = {
         (): SessionStart(name=base_name)
@@ -52,14 +52,14 @@ def _get_base_graph(
         parent = res_temp[parent_path]
         assert isinstance(parent, (SessionStart, ContextEntry))
         if isinstance(
-            fld.shape,
-            (
-                AtomicShape,
-                ContainerShape,
-                DictShape,
-                FixedContainerShape,
-                LiteralShape,
-            ),
+                fld.shape,
+                (
+                        AtomicShape,
+                        ContainerShape,
+                        DictShape,
+                        FixedContainerShape,
+                        LiteralShape,
+                ),
         ):
             res_temp[fld.path] = InputStep(fld, parent=parent)
         else:
@@ -68,9 +68,8 @@ def _get_base_graph(
     return list(res_temp.values()) + [SessionEnd()]
 
 
-
 def _expand_fixed_schema_containers(
-    steps: list[SessionStart | ContextEntry | InputStep | SessionEnd],
+        steps: list[SessionStart | ContextEntry | InputStep | SessionEnd],
 ) -> list[SessionStart | ContextEntry | InputStep | SessionEnd]:
     """
     Expand FixedSchemaContainerShape contexts (e.g. tuple[T, T]) into N repeated
@@ -88,9 +87,9 @@ def _expand_fixed_schema_containers(
 
         # Keep non-fixed-schema-container steps as-is
         if (
-            isinstance(step_cur, (SessionStart, SessionEnd))
-            or not isinstance(step_cur, ContextEntry)
-            or not isinstance(step_cur.field.shape, FixedSchemaContainerShape)
+                isinstance(step_cur, (SessionStart, SessionEnd))
+                or not isinstance(step_cur, ContextEntry)
+                or not isinstance(step_cur.field.shape, FixedSchemaContainerShape)
         ):
             res.append(step_cur)
             i += 1
@@ -100,12 +99,12 @@ def _expand_fixed_schema_containers(
         shape = cast(FixedSchemaContainerShape, step_cur.field.shape)
 
         # Collect its contiguous descendant subgraph (ContextEntry/InputStep only)
-        remaining = steps[i + 1 :]
+        remaining = steps[i + 1:]
         subgraph: list[ContextEntry | InputStep] = [
             step
             for step in remaining
             if isinstance(step, (ContextEntry, InputStep))
-            and is_child_path(step_cur.field.path, step.field.path)
+               and is_child_path(step_cur.field.path, step.field.path)
         ]
 
         to_repeat: list[ContextEntry | InputStep] = [step_cur] + subgraph
@@ -157,7 +156,7 @@ def _expand_fixed_schema_containers(
 
 
 def _add_repeat_exits(
-    steps: list[SessionStart | ContextEntry | InputStep | SessionEnd],
+        steps: list[SessionStart | ContextEntry | InputStep | SessionEnd],
 ) -> list[SessionStep]:
     res: list[SessionStep] = []
     pending: list[
@@ -171,10 +170,10 @@ def _add_repeat_exits(
 
         # RepeatExits come right before next non-child; outer contexts have priority over inner contexts
         if isinstance(step_cur, ContextEntry) and isinstance(
-            step_cur.field.shape, SchemaContainerShape
+                step_cur.field.shape, SchemaContainerShape
         ):
             rxt = RepeatExit(parent=step_cur, element_start=steps[i + 1])
-            remaining = steps[i + 1 :]
+            remaining = steps[i + 1:]
             next_non_child = _next_input_or_context_outside_cur(remaining, step_cur)
             pending.insert(0, (next_non_child, rxt))
 
@@ -197,7 +196,7 @@ def _add_skips(steps: list[SessionStep]) -> list[SessionStep]:
             res.append(step_cur)
             continue
 
-        remaining = steps[i + 1 :]
+        remaining = steps[i + 1:]
         shape = step_cur.field.shape
         if isinstance(shape, SchemaContainerShape):
             # Skip target is step directly after matching RepeatExit
@@ -214,7 +213,6 @@ def _add_skips(steps: list[SessionStep]) -> list[SessionStep]:
             last_descendant = _find_last_descendant(remaining, step_cur)
             skip_target_i = remaining.index(last_descendant) + 1
             skip_target = remaining[skip_target_i]
-            assert isinstance(skip_target, (ContextEntry, InputStep, RepeatExit, SessionEnd))
             step_cur.skip_target = skip_target
 
         res.append(step_cur)
@@ -232,7 +230,7 @@ def _link_graph(steps: list[SessionStep]) -> None:
 # Helpers
 # ------------------------------------------------------------
 def _find_last_descendant(
-    remaining: list[SessionStep], context: ContextEntry
+        remaining: list[SessionStep], context: ContextEntry
 ) -> InputStep:
     next_outside_cur = _next_input_or_context_outside_cur(remaining, context)
     i_to_check = remaining.index(next_outside_cur) - 1
@@ -246,14 +244,14 @@ def _find_last_descendant(
 
 
 def _next_input_or_context_outside_cur(
-    remaining: list[SessionStep], context: ContextEntry
+        remaining: list[SessionStep], context: ContextEntry
 ) -> InputStep | ContextEntry | SessionEnd:
     return next(
         step
         for step in remaining
         if isinstance(step, SessionEnd)
         or (
-            isinstance(step, (InputStep, ContextEntry))
-        and not context.field.path == step.field.path[:len(context.field.path)]
+                isinstance(step, (InputStep, ContextEntry))
+                and not context.field.path == step.field.path[:len(context.field.path)]
         )
     )
