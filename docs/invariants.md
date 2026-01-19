@@ -1,3 +1,5 @@
+These invariants define the contracts between pipeline stages. Tests are written against these contracts; if they hold, higher-level behavior is expected to be correct.
+
 # User definitions
 **Validated in:** `_pipeline/validate_user_definitions.py`
 
