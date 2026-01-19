@@ -1,48 +1,83 @@
 # Technical overview
 
-The pipeline used in this library is: schema validation -> schema normalization -> build a session graph -> walk the graph and ask user for input -> reconstruct schema. In some respects, it's actually quite similar to how a compiler works.
+The pipeline used in this library is:
+
+schema validation → schema normalization → session graph construction → interactive session → schema reconstruction
+
+In some respects, it closely resembles a compiler pipeline.
+
+---
 
 ## Validation
 
-The program should crash instantly when the schema or one of the user-provided registries is invalid: when this happens 
-during data input, that's poor UX (and hard to debug!) I enforce three main rules for schemas:
+The program should fail fast when the schema or any user-provided registry is invalid. Discovering such errors during an interactive session results in poor UX and is difficult to debug.
 
-- Reject ambiguous types (example: `str | int` -> is the parser supposed to choose `str` or `int`?)
+Validation enforces three core constraints:
 
-- Reject types that cause the end user to input nested parentheses: this causes poor UX (example: `list[list[list[str]]]` would require the user to type `((str, ...), ...)` )
+- **Reject ambiguous types**  
+  Example: `str | int` — the parser cannot know which branch the user intends.
 
-- Reject types that cause the end user to lose their orientation within the graph (example: nested schemas as `dict` values)
+- **Reject types that force nested parentheses in user input**  
+  Example: `list[list[list[str]]]` would require the user to enter `((str, ...), ...)`, which is hard to read and error-prone.
 
-None of the following steps should have to question the validity of schemas that get past this point.
+- **Reject types that cause users to lose orientation within the input graph**  
+  Example: schemas nested inside dictionary values.
+
+Schemas that pass validation are assumed to be well-formed. All downstream stages may rely on these guarantees without re-checking them.
+
+---
 
 ## Normalization
 
-This step is there so that further steps don't have to do further type introspection and don't have to refer back to the original schema, as those things are often a source of bugs. Two main goals:
+Normalization exists so that downstream stages do not need to perform further type introspection or reference the original schema. Both are frequent sources of subtle bugs.
 
-- Extract relevant metadata from the original schema (defaults for example)
+This step has two main goals:
 
-- Abstract the field types into shapes that are relevant to the further steps in the pipeline. Take for example a `ContainerShape`, 
-which I define as "Shape representing a homogeneous container of terminal elements". The session graph further up in the pipeline does 
-not care if the underlying type is `list[str]`, `set[str]` or `tuple[str, ...]`: all it needs to know is "ask the user for any number of values of type T, and don't expand into a new context".
+- **Extract relevant metadata** from the original schema (defaults, optionality, annotations, etc.)
 
-## Build session graph
+- **Abstract concrete Python types into a small set of structural shapes** used by later stages
 
-This step builds a graph that answers some of the following questions:
+For example, a `ContainerShape` represents a homogeneous container of terminal elements. At this level, it does not matter whether the original type was `list[str]`, `set[str]`, or `tuple[str, ...]`. The session graph only needs to know:
 
-- Is this field a new context or an input step?
+> “Ask the user for any number of values of type `T`, without introducing a new context.”
 
-- Is this input step or context optional (ie, can I jump ahead in the graph)?
+---
 
-- Can the user loop back to a point earlier in the graph? (Example: after the last entry of `list[T]` where `T` is a schema)
+## Session graph construction
+
+This stage constructs an explicit graph that encodes the interactive control flow.
+
+The graph answers questions such as:
+
+- Does this field introduce a new context, or is it a simple input step?
+- Is this context or input optional (i.e. can it be skipped)?
+- Can the user loop back to a previous point in the session?
+  - Example: after entering the last element of `list[T]` where `T` is a schema
+
+This graph is fully determined before any user interaction begins.
+
+---
 
 ## User session
 
-Here we walk the graph and collect input: this is the user-facing part. The session should be able to switch solely on the shapes and graph we defined before.
+The user session walks the precomputed graph and collects input. This is the only user-facing part of the pipeline.
 
-The input is stored in an array of `UserInput` objects: these are simple structs that hold the input and a pointer to the matching step on the graph. I constructed it like this, so that undoing an input is as simple as popping off the last index of that array, regardless of which context that value came from. Undo functionality was very important to me: as I make quite a lot of typos myself, I'm always annoyed when I have to redo an entire form because of a typo in a previous entry!
+At this stage, behavior depends solely on:
+- the session graph, and
+- the normalized shapes
 
-Input validation and parsing is done in a helper module (`_parse_input`).
+User input is stored as a sequence of `UserInput` records. Each record contains:
+- the parsed value, and
+- a reference to the corresponding node in the session graph
+
+This design makes undo trivial: undoing an action is simply popping the last element from the input list, regardless of which context the value originated from.
+
+Undo support is a first-class feature. Typos are common, and forcing users to restart an entire session due to a single mistake results in poor UX.
+
+Input parsing and validation are handled by a dedicated helper module (`_parse_input`).
+
+---
 
 ## Schema reconstruction
 
-Take the original schema and the result of the session, and return an instance. 
+Finally, the original schema definition and the collected session inputs are combined to produce a fully-initialized schema instance.
