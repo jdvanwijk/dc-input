@@ -1,5 +1,5 @@
-These invariants define the contracts between pipeline stages. Tests are written against these contracts; if they hold,
-higher-level behavior is expected to be correct.
+These invariants define the contracts between pipeline stages. Tests are written against these contracts; if they
+hold, higher-level behavior is expected to be correct.
 
 # User definitions
 
@@ -23,12 +23,6 @@ higher-level behavior is expected to be correct.
     - *Notes:* Use `alt_issubclass` from `_pipeline/_utils.py` for subclass checks
 
 ## Schema
-
-- **Rule:** A schema must be a dataclass
-    - *Why:* Dataclasses require type hints, which are needed for parsing input values
-
-- **Rule:** A schema must have at least one field
-    - *Why:* An empty schema cannot produce an interactive session
 
 ### Union
 
@@ -59,11 +53,6 @@ higher-level behavior is expected to be correct.
     - *Why:* Deeply nested schema containers are confusing and make it easy for users to lose their bearing
     - *Example:* `list[Schema]` is valid; `list[list[Schema]]` is invalid
 
-### Set
-
-- **Rule:** Schemas used in `set` must be declared with `frozen=True`
-    - *Why:* Set elements must be hashable; unhashable schemas would fail during reconstruction, resulting in poor UX
-
 ### Fixed-size Tuple with schemas
 
 - **Rule:** Must be homogeneous
@@ -79,50 +68,41 @@ higher-level behavior is expected to be correct.
     - *Why:* Adds parsing complexity without providing practical benefits
     - *Example:* `list[Annotated[T]]` is invalid; use `Annotated[list[T]]` instead
 
-### None / NoneType
-
-- **Rule:** Field types must not be `NoneType`
-    - *Why:* A field with type `None` / `NoneType` has no semantic meaning in an interactive session
-
 ## Container alias registry
 
 A container alias registry maps a *custom container type* to a *concrete builtin container implementation* that the
 system knows how to parse (e.g. alias `MyList` → `list[str]` or `list`).
 
-- **Rule:** The registry must be a `dict`
-    - *Why:* The system expects `dict.items()` semantics
-
 - **Rule:** Registry keys must be **concrete, non-parameterized types**
-    - *Why:* Parameterized types are not stable runtime keys and are hard to reason about in user APIs
-    - *Example:* `MyList[int]` as a key is invalid
-    - *Example:* `MyList` as a key is valid
-
-
-- **Rule:** Registry values must be concrete types or parameterized types
-    - *Why:* Alias resolution inspects the value’s base type and type arguments
+    - *Why:* Complicates parsing/reconstruction, without benefits
+    - *Notes:* Values *are* allowed to be parameterized types
 
 - **Rule:** Alias values must satisfy the same “type shape” constraints as schema fields.
     - *Why:* Alias value is used exactly as a 'normal' type hint
 
 - **Rule:** Alias values must be subclasses of `dict`, `list`, `set`, or `tuple`
     - *Why:* The input system only knows how to parse these container families
-    - *Example:* aliasing to `collections.deque` is invalid unless it subclasses one of the supported families
+    - *Notes:* If a valid use case arises, we might expand this
 
 ## Parser registry
 
 A parser registry maps **concrete leaf types** to parser functions used by the input system.
 
-- **Rule:** The registry must be a `dict`
-    - *Why:* The system expects `dict.items()` semantics and deterministic type → parser lookup
-
 - **Rule:** Registry keys must be **concrete, non-parameterized types**
-    - *Why:* Parsers are looked up by runtime type; parameterized types are not stable lookup keys
-    - *Example:* `list[int]` is invalid as a key
-    - *Example:* `datetime.date` is valid as a key
+    - *Why:* Parsers deal with leaf values which are almost never parameterized. Taking parameterization into account
+      adds quite a bit of complexity.
+    - *Notes:* If a valid use case arises, we might expand this
+
+- **Rule:** Parsers must not be registered for built-in parsing domains (e.g. `int`, `str`, containers, `Union`, `Any`,
+  etc.)
+    - *Why:* Overriding these breaks core parsing semantics and conflicts with type-shape rules
+
 
 - **Rule:** Registry values must be callable
     - *Why:* Parsers are invoked as functions during input parsing
-    - *Implications:* A parser should raise a descriptive exception (e.g. `ValueError`) on invalid input
+
+- **Rule:** A parser should raise a descriptive exception (e.g. `ValueError`) on invalid input
+    - *Why:* User needs actionable feedback on invalid input
 
 ---
 
@@ -154,51 +134,17 @@ stages do not need to re-introspect user types.
 
 ## KeyPath
 
-- **Rule:** Every entry key is a `KeyPath` (tuple of field names) identifying a field in the schema tree
-    - *Why:* Graph construction and reconstruction need a stable identifier for each field. The flat structure of a
-      KeyPath makes it easier to reason about.
-
 - **Rule:** Paths are globally unique within the normalized schema
     - *Why:* `NormalizedSchema` is a dict; collisions would silently overwrite fields
 
-- **Rule:** The normalized schema includes entries for all fields of any nested schema reachable from the root schema
-    - *Why:* Downstream stages must be able to build a complete session graph without re-inspecting user schemas
-
 ## NormalizedField
 
-For each `NormalizedField nf`:
-
-- **Rule:** `nf.default` and `nf.default_factory` are copied verbatim from the dataclass `Field`
-    - *Why:* Defaults must behave exactly like dataclass initialization semantics
-
-- **Rule:** `nf.annotation` is a string extracted from `typing.Annotated[...]` or empty string if absent
-    - *Why:* Annotations are used purely for UX (inline hints), not for typing semantics
-    - *Notes:* Annotation extraction searches through the type structure but returns at most one string value (the first
-      found)
-
-- **Rule:** `nf.is_optional` is true if the *declared field type* was optional (`T | None` / `Optional[T]`)
-    - *Why:* Optionality affects session control flow (skipping contexts, marking `?`, and reconstruction behavior)
-
-- **Rule:** `nf.type_non_aliased` `nf.type_non_aliased` is the field’s logical **user-declared** type with:
+- **Rule:** `nf.type_non_aliased` is the field’s logical **user-declared** type with:
     - `Annotated` stripped
     - Optionality stripped (`T | None` → `T`)
     - container aliasing **not** applied
     - *Why:* Downstream reconstruction should use the real user type, while parsing may use alias
       shapes
-
-## Shape kinds
-
-Shapes describe how values are collected during the session and reconstructed afterward.
-The returned shape is always one of:
-
-- `AtomicShape(value_type)`
-- `LiteralShape(values)`
-- `DictShape(key: AtomicShape, value: AtomicShape)`
-- `ContainerShape(container_type, element_shape)`
-- `SchemaContainerShape(container_type, schema_type)`
-- `FixedContainerShape(tuple_type, element_shapes)`
-- `FixedSchemaContainerShape(tuple_type, schema_type, length)`
-- `SchemaShape(schema_type)`
 
 ---
 
@@ -268,9 +214,6 @@ of the schema subtree.
     - *Why:* `tuple[T, T] | None` means “either the whole tuple is absent, or all elements are present”
     - *Implications:* During expansion, repeats `n>0` of the tuple context must have `is_optional=False`
 
-- **Rule:** Each cloned fixed-schema tuple context has `position_info = (n_repeat, total_repeats)`
-    - *Why:* Used for UI and for distinguishing repeated traversals
-
 ## Repeat exits (`_add_repeat_exits`)
 
 This phase inserts `RepeatExit` nodes for repeatable schema containers (`SchemaContainerShape`, e.g. `list[T]` where `T`
@@ -327,111 +270,89 @@ Correctness depends on a strict set of invariants about control flow, state, and
 
 ## Global control flow
 
-- **Rule:** `run_user_session(step_cur, parsers, res)` dispatches solely on the concrete type of `step_cur`
-  (`SessionStart`, `ContextEntry`, `InputStep`, `RepeatExit`, `SessionEnd`)
-  - *Why:* The runner is a closed state machine; unexpected node types indicate a broken graph
-
 - **Rule:** `res` is append-only except for undo operations
-  - *Why:* Ensures uniform undo semantics across all contexts and container boundaries
+    - *Why:* Ensures uniform undo semantics across all contexts and container boundaries
 
-- **Rule:** Input exactly equal to `".."` triggers undo
-  - *Why:* Uniform escape hatch across all prompts
-
-## SessionStart
-
-- **Rule:** On `SessionStart`, the runner:
-  1. prints instructions and the initial header
-  2. advances unconditionally to `step_cur.next`
-  - *Why:* The start node is purely presentational and never collects input
-  
-
-## ContextEntry
-
-A context entry may be **mandatory** or **skippable**, depending on `skip_target`.
-
-### Mandatory context
-
-- **Rule:** If `step_cur.skip_target` is not set:
-  - print the context header
-  - print the annotation (if present)
-  - advance to `step_cur.next`
-  - *Why:* Mandatory contexts must always be traversed
-
-### Skippable context
-
-- **Rule:** If `step_cur.skip_target` is set, the runner prompts:
-  ```
-  Add <context> to <parent>? <y/n>
-  ```
-  - `y` → advance to `step_cur.next`
-  - `n` → jump to `step_cur.skip_target`
-  - `..` → undo
-  - *Why:* Models optional schemas and schema containers
-
-- **Rule:** Context annotations are printed *before* the skip prompt
-  - *Why:* Annotations are intended to inform the user’s decision
-
-- **Rule:** If `step_cur.position_info` is present, the prompt includes repeat information
-  - *Why:* Required to distinguish repeated traversals of fixed schema tuples
-
+- **Rule:** Input equal to `".."` always triggers undo, regardless of SessionStep type
+    - *Why:* Uniform escape hatch across all prompts
 
 ## InputStep
 
 - **Rule:** Each `InputStep` consumes exactly one user interaction and results in exactly one of:
-  - appending a `UserInput`
-  - undo
-  - retrying the same step after an error
+    - appending a `UserInput`
+    - undo
+    - retrying the same step after an error
 
 ### Special input handling
-- **Rule:** Empty input (`""`) is handled as follows:
-  1. If the field has a default or default factory → append default value
-  2. Else if `_can_skip(field)` → append `None`
-  3. Else → error and retry
-  - *Why:* Empty input is overloaded for defaults and optional fields; for the user, both mean 'skip this field'
 
-- **Rule:** Non-empty input is parsed via `parse_input(v_input, field.shape, parsers)`
-  - *Why:* Parsing semantics are centralized outside the session runner for readability and testabilitiy
+- **Rule:** Empty input (`""`) is handled as follows:
+    1. If the field has a default or default factory → append default value
+    2. Else if `_can_skip(field)` → append `None`
+    3. Else → error and retry
+
+    - *Why:* Empty input is overloaded for defaults and optional fields; for the user, both mean 'skip this field'
 
 - **Rule:** If parsing raises a non-`AssertionError` exception, the error is shown and the same step is retried
-  - *Why:* Invalid user input must not crash the session
+    - *Why:* We can't assume a specific Error type emitted from parsers, except for `AssertionError`: here we can be
+      sure
+      that it's library-internal
+    - *Notes:* Prefer ValueError for library parsers and recommend this too the user as well for consistency
+    - *Notes:* `AssertionError` may be replaced with a library-unique `CriticalError` in the future
 
-- **Rule:** If the field uses a container alias, the parsed value is converted back to the user’s declared container type
-  - *Why:* Aliases affect parsing only; final values must respect user-defined types
-
-### Context header re-printing
-
-- **Rule:** If an `InputStep` is entered from a different parent context than the previous input, a `(contd.)` header may be printed
-  - *Why:* Preserves user orientation when re-entering contexts
-
-
-## RepeatExit
-
-- **Rule:** `RepeatExit` always prompts:
-  ```
-  Add another <schema> to <parent>? <y/n>
-  ```
-  - `y` → jump to `step_cur.element_start`
-  - `n` → advance to `step_cur.next`
-  - `..` → undo
-  - *Why:* Defines the repeat boundary for schema containers
-
-## SessionEnd
-
-- **Rule:** `SessionEnd` prompts:
-  ```
-  Finish? <y/n>
-  ```
-  - `y` → return the collected `SessionResult`
-  - `n` → undo
-  - `..` → undo
-  - *Why:* Provides the opportunity to undo the final field of the schema
-
+- **Rule:** If the field uses a container alias, the parsed value is converted back to the user’s declared container
+  type
+    - *Why:* Aliases affect parsing only; final values must respect user-defined types
 
 ## Undo semantics
 
 - **Rule:** Undo removes the most recent `UserInput` and resumes execution at its corresponding `InputStep`
-  - *Why:* Undo is input-centric, not graph-centric
+    - *Why:* Undo is input-centric, not graph-centric
 
-- **Rule:** If undo crosses a visible boundary (session end, context boundary, or repeat boundary), a context header is printed
-  - *Why:* Maintains user orientation after large jumps
+---
+
+# Input parsing
+
+**Implemented in:** `_pipeline/_parse_input.py`
+
+Parsing converts raw user input strings into Python values according to an `InputShape`.
+It is a pure transformation step: it does not know about session control flow, contexts, or graph structure.
+
+## Structure parsing
+
+- **Rule:** Structure parsing depends on the shape kind:
+    - `AtomicShape`, `LiteralShape` → flat structure parsing
+    - `ContainerShape`, `DictShape`, `FixedContainerShape` → nested structure parsing
+    - *Why:* Only composite shapes can legally contain grouping/parentheses
+
+### Flat structure (`_parse_structure_flat`)
+
+- **Rule:** Flat parsing:
+    - trims surrounding whitespace
+    - interprets backslash escapes (`\x` → literal `x`)
+    - returns a single string token
+    - *Why:* Atomic and literal values should not require grouping syntax
+
+### Nested structure (`_parse_structure_nested`)
+
+- **Rule:** Nested parsing interprets:
+    - commas as separators at the current nesting level
+    - parentheses as explicit grouping
+    - backslash escapes inside all contexts
+    - *Why:* Composite values require a simple, uniform grammar for grouping
+
+- **Rule:** Empty tokens are ignored (whitespace-only or empty segments between commas/parentheses)
+    - *Why:* Makes input forgiving (`a, b,` behaves like `a,b`) and keeps coercion simple
+
+- **Rule:** Nested parsing always produces a tree of `list[str | list]`
+    - *Why:* Coercion relies on a uniform intermediate representation
+
+## Parser selection
+
+- **Rule:** For an atomic type `T`, `_select_parser(T, registry)` chooses:
+    - `registry[T]` if present, otherwise
+    - a fallback parser `lambda s: T(s)` (i.e. call the type constructor)
+    - *Why:* Supports custom parsing while allowing sensible defaults for common types
+
+---
+
 
